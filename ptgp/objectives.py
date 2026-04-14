@@ -52,7 +52,7 @@ def elbo(svgp, X, y, n_data=None):
     scalar
         ELBO value.
     """
-    fmean, fvar = svgp.predict_f(X)
+    fmean, fvar = svgp.predict(X)
 
     var_exp = svgp.likelihood.variational_expectation(y, fmean, fvar)
     var_exp_sum = pt.sum(var_exp)

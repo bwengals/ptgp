@@ -32,6 +32,12 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 - GPJax uses float32; PTGP uses float64. Use `atol=1e-5` for cross-library comparisons.
 - Test pattern: set up identical inputs, evaluate both libraries, compare with `np.testing.assert_allclose`.
 
+## Notebooks
+
+- Jupyter notebooks are stored as Jupytext markdown (`.md`) files, not `.ipynb`. The `.gitignore` excludes `*.ipynb`.
+- To create or update a notebook, write or edit the `.md` file directly. Use Jupytext markdown format with the `jupyter:` YAML frontmatter.
+- To convert an existing `.ipynb` to `.md`: `jupytext --to md notebook.ipynb`
+
 ## Environment
 
 - Conda env: `ptgp` (Python 3.14, at `/Users/bill/miniconda3/envs/ptgp`)

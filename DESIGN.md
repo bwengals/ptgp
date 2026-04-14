@@ -6,7 +6,8 @@ A practical GP library for advanced users who need modeling flexibility, built o
 
 - **PyTensor**: symbolic computation, graph rewrites, kernel matrix structure annotations (using PR #2032 `assumption-system` branch)
 - **PyMC**: `pm.Model()` as prior container only — no PyMC samplers or inference routines
-- **JAX + Optax**: JIT compilation and optimization via `get_jaxified_graph` — long-term goal is native PyTensor training routines
+- **JAX + Optax**: JIT compilation and optimization via `get_jaxified_graph` (in `ptgp/inference/`)
+- **Native PyTensor optimizers**: Adam/SGD via `pytensor.shared` variables (in `ptgp/optim/`) — no JAX dependency required
 - **Kernels**: implemented natively in PTGP; long-term goal is for PyMC to depend on PTGP for kernels
 
 ## Models
@@ -23,30 +24,40 @@ All three are user facing. SVGP is the primary model for large datasets. VFE for
 
 - `pm.Model()` is used **only** as a container for the prior graph
 - `model.logp()` gives a symbolic PyTensor prior log-prob expression
-- PTGP compiles this to JAX and optimizes with L-BFGS-B or Optax SGD
+- Two optimization paths:
+  - **JAX-based** (`ptgp/inference/`): L-BFGS-B or Optax SGD via JAX compilation
+  - **Native PyTensor** (`ptgp/optim/`): Adam/SGD using `pytensor.shared` variables — prediction automatically uses trained parameters
 - Kernel and likelihood hyperparameters are PyMC RVs defined in `pm.Model` context
 
-**User-facing pattern:**
+**User-facing pattern (native PyTensor):**
 ```python
+import ptgp as pg
+
+X_var = pt.matrix("X")
+y_var = pt.vector("y")
+
 with pm.Model() as model:
-    ls    = pm.LogNormal("ls", mu=0, sigma=1)
-    eta   = pm.HalfNormal("eta", sigma=1)
-    sigma = pm.HalfNormal("sigma", sigma=1)
+    ls    = pm.InverseGamma("ls", alpha=2.4, beta=1.5)
+    eta   = pm.Exponential("eta", lam=1.0)
+    sigma = pm.HalfNormal("sigma", sigma=1.0)
 
-    cov        = eta**2 * ptgp.kernels.ExpQuad(1, ls=ls)
-    mean       = ptgp.mean.Zero()
-    likelihood = ptgp.likelihoods.Gaussian(sigma)
+    kernel = eta**2 * pg.Matern52(ls=ls)
+    gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
 
-    z = ptgp.InducingPoints(Z_init)
-    svgp = ptgp.SVGP(mean, cov, likelihood, z, whiten=True)
+# Compile training step — parameters stored as shared variables
+train_step, shared_params, shared_extras = pg.compile_training_step(
+    pg.marginal_log_likelihood, gp, X_var, y_var, pm_model=model,
+)
 
-gp.fit(X_train, y_train, method="sgd", optimizer=optax.adam(1e-3))
-mu, var = gp.predict(X_new)
+for i in range(500):
+    loss = train_step(X_train, y_train)
+
+# Compile prediction — reads same shared variables, no model reconstruction
+X_new_var = pt.matrix("X_new")
+predictn = pg.compile_predict(gp, X_new_var, model, shared_params,
+                                X_train=X_train, y_train=y_train)
+mu, var = predictn(X_test)
 ```
-
-## Data Handling
-
-Reuses PyMC's `pm.Data` for data containers, allowing data to be swapped for minibatching.
 
 ## Kernel Design
 
@@ -68,6 +79,17 @@ Standalone functions, not methods on model classes (follows GPJax's pattern):
 - `elbo(svgp, X_batch, y_batch)` — SVGP (scales by `n_data / batch_size`)
 - `collapsed_elbo(vfe, X, y)` — VFE/SGPR (Titsias' bound)
 
+Each objective is 1:1 with a model class and cannot be used interchangeably. They are standalone functions rather than methods because `compile_training_step` takes the objective as a first-class callable with a uniform `(model, X, y)` signature. This makes composition straightforward — e.g. wrapping the ELBO with minibatch scaling:
+
+```python
+def elbo_scaled(model, X, y):
+    return pg.elbo(model, X, y, n_data=N)
+
+pg.compile_training_step(elbo_scaled, svgp, X_var, y_var, ...)
+```
+
+If objectives were methods, passing them to `compile_training_step` would require lambdas or wrappers.
+
 ## Core GP Math
 
 Shared `base_conditional(Kmn, Kmm, Knn, f, q_sqrt=None, white=False)` function (following GPflow) implements posterior conditional math for all three models. Linear algebra written naively, delegated to PyTensor's rewrite system.
@@ -86,10 +108,31 @@ Class hierarchy following GPflow, enabling dispatch for inter-domain/multiscale/
 - **Non-Gaussian**: Gauss-Hermite quadrature (20 points default, matching GPflow) using `pm.logp(dist.dist(...), y)`
 - Hyperparameters are PyMC RVs passed at construction
 
+## Optimization (`ptgp/optim/`)
+
+Native PyTensor training without JAX. Uses `pytensor.shared` variables so that trained parameters are automatically available for prediction without reconstructing the model.
+
+### Architecture
+
+- **`optimizers.py`**: Adam and SGD, each taking `(loss, params, **kwargs)` and returning `OrderedDict{shared_var: update_expr}`. Ported from `pymc.variational.updates`.
+- **`training.py`**: `compile_training_step()` and `compile_predict()`.
+  - `_make_shared_params()` creates `pytensor.shared` variables from PyMC's `initial_point()`
+  - `_replace_graph()` substitutes PyMC RVs → value vars → shared vars using `graph_replace`
+  - Optimizer updates are passed to `pytensor.function(..., updates=...)` so calling the function updates parameters in-place
+  - `compile_predict()` builds a prediction function using the same shared variables — no model reconstruction needed
+
+### SVGP extra variables
+
+For SVGP, variational parameters (`q_mu`, `q_sqrt`) are not PyMC RVs. Pass them as `extra_vars` with `extra_init` to `compile_training_step`. They get their own shared variables and are optimized alongside the PyMC parameters.
+
+### Known issue: recursion depth
+
+PyTensor's assumption-system branch recursively traverses the graph to infer matrix properties. SVGP + Adam creates a large enough graph that this exceeds Python's default recursion limit. Use `sys.setrecursionlimit(50000)` before compiling SVGP models. The rewrite failures are caught gracefully and don't affect correctness.
+
 ## Prediction
 
 - `predict()` returns symbolic PyTensor tensors
-- GP is stateful — stores training data after `fit()`
+- With `ptgp/optim/`, use `compile_predict()` to get a callable that reads trained shared parameters
 
 ## SVGP Variational Parameterization
 
@@ -130,12 +173,13 @@ Enables scaling via CG-based solves, lazy kernel matrix-vector products, and Lan
 7. ~~`ptgp/vfe.py`~~ ✓
 8. `ptgp/linalg/` (deferred — algorithm selection depends on matrix size, which is symbolic at graph-build time; needs design work)
 9. ~~`ptgp/svgp.py`~~ ✓
+10. ~~`ptgp/optim/`~~ ✓
 
 ## Future Directions
 
 - Upstream `ptgp/linalg/` to PyTensor
 - PyMC to depend on PTGP for GP kernels
-- Native PyTensor training routines (replace JAX/Optax)
+- Fix assumption-system recursion depth issue upstream in PyTensor
 - Toeplitz structured matrix support
 - Sparse kernel support
 - Natural/expectation variational parameterizations

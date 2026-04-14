@@ -24,8 +24,8 @@ class GP:
         self._X_train = None
         self._y_train = None
 
-    def predict_f(self, X_new, X_train=None, y_train=None):
-        """Posterior predictive mean and variance of the latent function.
+    def predict(self, X_new, X_train=None, y_train=None, incl_lik=False):
+        """Posterior predictive mean and variance.
 
         Parameters
         ----------
@@ -33,11 +33,13 @@ class GP:
         X_train : tensor, shape (N, D), optional
             Uses stored training data if not provided.
         y_train : tensor, shape (N,), optional
+        incl_lik : bool
+            If True, include likelihood noise in the predictions.
 
         Returns
         -------
-        fmean : tensor, shape (N*,)
-        fvar : tensor, shape (N*,)
+        mean : tensor, shape (N*,)
+        var : tensor, shape (N*,)
         """
         if X_train is None:
             X_train = self._X_train
@@ -55,6 +57,8 @@ class GP:
         v = pt.linalg.solve(Knn_noisy, Kns)
         fvar = Kss_diag - pt.sum(Kns * v, axis=0)
 
+        if incl_lik:
+            return self.likelihood.predict_mean_and_var(fmean, fvar)
         return fmean, fvar
 
     def kernel_diag(self, X):

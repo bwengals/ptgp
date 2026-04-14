@@ -12,7 +12,8 @@ from ptgp.likelihoods import (
     Likelihood, Gaussian, Bernoulli, StudentT, Poisson, NegativeBinomial,
 )
 from ptgp.objectives import marginal_log_likelihood, elbo, collapsed_elbo
-from ptgp.inference import fit_bfgs, make_training_step
+from ptgp.inference import fit_bfgs, fit_model, make_training_step, make_training_step_model
+from ptgp.optim import adam, sgd, compile_training_step, compile_predict, get_trained_params
 
 __all__ = [
     # Models
@@ -46,7 +47,15 @@ __all__ = [
     "marginal_log_likelihood",
     "elbo",
     "collapsed_elbo",
-    # Inference
+    # Inference (JAX-based)
     "fit_bfgs",
+    "fit_model",
     "make_training_step",
+    "make_training_step_model",
+    # Optim (native PyTensor)
+    "adam",
+    "sgd",
+    "compile_training_step",
+    "compile_predict",
+    "get_trained_params",
 ]

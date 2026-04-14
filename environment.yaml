@@ -3,7 +3,7 @@ channels:
     - conda-forge
 dependencies:
     - python>=3.11
-    - pymc>=5.28.4
+    #- pymc  # installed from v6 branch via pip
     - jax
     - jaxlib
     - optax
@@ -19,8 +19,12 @@ dependencies:
     - seaborn
     - pandas
     - scikit-learn
-    - arviz
+    #- arviz  # installed via pip (arviz 1.x + arviz-base + arviz-plots)
     - pip
     - pip:
-        - pymc-extras>=0.2.3
         - git+https://github.com/pymc-devs/pytensor@assumption-system
+        - git+https://github.com/pymc-devs/pymc@v6
+        - "arviz>=1,<2"
+        - arviz-base
+        - arviz-plots
+        - git+https://github.com/arviz-devs/preliz@main
