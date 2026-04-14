@@ -1,6 +1,7 @@
 ---
 jupyter:
   jupytext:
+    formats: md,ipynb
     text_representation:
       extension: .md
       format_name: markdown
@@ -28,12 +29,13 @@ import matplotlib.pyplot as plt
 import ptgp as pg
 ```
 
-## Generate data
+## Generate data, student-t noise
 
 ```python
 rng = np.random.default_rng(600)
 N = 200
 noise_std = 0.2
+nu_true = 6
 
 # True GP hyperparameters
 eta_true = 1.3
@@ -47,7 +49,7 @@ K = eta_true**2 * pg.Matern52(ls_true)
 K = K(X_train, X_train).eval() + 1e-6 * np.eye(N)
 
 f_train = rng.multivariate_normal(np.zeros(N), K)
-y_train = f_train + noise_std * rng.standard_normal(N)
+y_train = f_train + noise_std * rng.standard_t(df=nu_true, size=N)
 
 plt.scatter(X_train, y_train, s=10, label="data")
 plt.plot(X_train, f_train, "k--", alpha=0.5, label="true f")
@@ -181,10 +183,11 @@ with pm.Model() as svgp_model:
     ls = pm.HalfFlat("ls")
     eta = pm.Exponential("eta", lam=1.0)
     sigma = pm.HalfNormal("sigma", sigma=1.0)
+    nu = pm.Gamma("nu", alpha=2, beta=0.1)
 
     svgp = pg.SVGP(
         kernel=eta**2 * pg.Matern52(ls=ls),
-        likelihood=pg.Gaussian(sigma=sigma),
+        likelihood=pg.StudentT(sigma=sigma, nu=nu),
         inducing_variable=pg.InducingPoints(Z_var),
         q_mu=q_mu_var,
         q_sqrt=q_sqrt_var,
@@ -215,7 +218,7 @@ for step in range(2000):
 
 params_svgp = pg.get_trained_params(svgp_model, shared_params_svgp)
 print(f"\nRecovered: {params_svgp}")
-print(f"True:      eta={eta_true}, ls={ls_true}, noise_std={noise_std}")
+print(f"True:      eta={eta_true}, ls={ls_true}, noise_std={noise_std}, nu={nu_true}")
 ```
 
 ```python
