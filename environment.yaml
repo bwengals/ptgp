@@ -2,32 +2,25 @@ name: ptgp
 channels:
     - conda-forge
 dependencies:
-    - python
-    - numba
-    - pandas
+    - python>=3.11
+    - pymc>=5.28.4
+    - jax
+    - jaxlib
+    - optax
     - scipy
-
-    # Dependencies for PyMC modeling
-    - arviz
-    - pip
-    - pymc>=5.21.0
     - libblas=*=*mkl
     - mkl-service
+    - pytest
+    - gpjax
+    - ipykernel
+    - ipywidgets
+    - ipympl
+    - matplotlib
     - seaborn
-    - nutpie
+    - pandas
+    - scikit-learn
+    - arviz
+    - pip
     - pip:
         - pymc-extras>=0.2.3
-        - ipympl
-        - networkx
-        - pydot
-        - cmocean
-        - gpjax
-
-    # JAX sampling
-    - jax
-    - numpyro
-    - blackjax
-
-    # Misc
-    - ipywidgets
-
+        - git+https://github.com/pymc-devs/pytensor@assumption-system

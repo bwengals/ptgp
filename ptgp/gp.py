@@ -4,11 +4,8 @@ from ptgp.conditionals import base_conditional
 from ptgp.mean import Zero
 
 
-class VFE:
-    """Variational Free Energy (SGPR) sparse Gaussian Process.
-
-    Uses Titsias' collapsed bound — inducing variables are analytically
-    integrated out.
+class GP:
+    """Exact (unapproximated) Gaussian process.
 
     Parameters
     ----------
@@ -17,16 +14,15 @@ class VFE:
     mean : callable, optional
         Mean function (default: Zero()).
     likelihood : Gaussian
-        Gaussian likelihood (VFE requires Gaussian likelihood).
-    inducing_variable : InducingVariables
-        Inducing point locations.
+        Gaussian likelihood (exact GP requires Gaussian likelihood).
     """
 
-    def __init__(self, kernel, mean=None, likelihood=None, inducing_variable=None):
+    def __init__(self, kernel, mean=None, likelihood=None):
         self.kernel = kernel
         self.mean = mean if mean is not None else Zero()
         self.likelihood = likelihood
-        self.inducing_variable = inducing_variable
+        self._X_train = None
+        self._y_train = None
 
     def predict_f(self, X_new, X_train=None, y_train=None):
         """Posterior predictive mean and variance of the latent function.
@@ -35,6 +31,7 @@ class VFE:
         ----------
         X_new : tensor, shape (N*, D)
         X_train : tensor, shape (N, D), optional
+            Uses stored training data if not provided.
         y_train : tensor, shape (N,), optional
 
         Returns
@@ -46,27 +43,17 @@ class VFE:
             X_train = self._X_train
             y_train = self._y_train
 
-        Z = self.inducing_variable.Z
-        sigma2 = self.likelihood.sigma**2
-
-        Kuu = self.kernel(Z)           # (M, M)
-        Kuf = self.kernel(Z, X_train)  # (M, N)
-        Kus = self.kernel(Z, X_new)    # (M, N*)
+        Knn = self.kernel(X_train)
+        Knn_noisy = Knn + self.likelihood.sigma**2 * pt.eye(X_train.shape[0])
+        Kns = self.kernel(X_train, X_new)  # (N, N*)
         Kss_diag = self.kernel_diag(X_new)
 
-        # Sigma = Kuu + Kuf @ Kuf.T / sigma^2
-        Sigma = Kuu + Kuf @ Kuf.T / sigma2
-        Sigma_inv = pt.linalg.inv(Sigma)
-
         mu_train = self.mean(X_train)
-        alpha = Sigma_inv @ Kuf @ (y_train - mu_train) / sigma2
+        alpha = pt.linalg.solve(Knn_noisy, y_train - mu_train)
 
-        fmean = self.mean(X_new) + Kus.T @ alpha
-
-        # fvar = Kss - Kus.T @ (Kuu^{-1} - Sigma^{-1}) @ Kus
-        Kuu_inv = pt.linalg.inv(Kuu)
-        diff_inv = Kuu_inv - Sigma_inv
-        fvar = Kss_diag - pt.sum(Kus * (diff_inv @ Kus), axis=0)
+        fmean = self.mean(X_new) + Kns.T @ alpha
+        v = pt.linalg.solve(Knn_noisy, Kns)
+        fvar = Kss_diag - pt.sum(Kns * v, axis=0)
 
         return fmean, fvar
 
