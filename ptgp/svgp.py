@@ -38,13 +38,19 @@ class SVGP:
         self.q_mu = q_mu if q_mu is not None else pt.zeros(M)
         self.q_sqrt = q_sqrt if q_sqrt is not None else pt.eye(M)
 
-    def predict_f(self, X):
-        """Posterior predictive mean and variance of the latent function.
+    def predict(self, X, incl_lik=False):
+        """Posterior predictive mean and variance.
+
+        Parameters
+        ----------
+        X : tensor, shape (N, D)
+        incl_lik : bool
+            If True, include likelihood noise in the predictions.
 
         Returns
         -------
-        fmean : tensor, shape (N,)
-        fvar : tensor, shape (N,)
+        mean : tensor, shape (N,)
+        var : tensor, shape (N,)
         """
         Z = self.inducing_variable.Z
         Kmm = self.kernel(Z)
@@ -55,6 +61,8 @@ class SVGP:
             Kmn, Kmm, Knn_diag, self.q_mu, self.q_sqrt, white=self.whiten
         )
         fmean = fmean + self.mean(X)
+        if incl_lik:
+            return self.likelihood.predict_mean_and_var(fmean, fvar)
         return fmean, fvar
 
     def prior_kl(self):
