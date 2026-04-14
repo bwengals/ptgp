@@ -1,0 +1,126 @@
+import pytensor.tensor as pt
+
+from ptgp.kernels.base import Kernel
+
+
+def _squared_distance(X, Y):
+    """Squared Euclidean distance between rows of X and Y.
+
+    Parameters
+    ----------
+    X : tensor, shape (N, D)
+    Y : tensor, shape (M, D)
+
+    Returns
+    -------
+    tensor, shape (N, M)
+    """
+    X2 = pt.sum(pt.square(X), axis=-1, keepdims=True)
+    Y2 = pt.sum(pt.square(Y), axis=-1, keepdims=True)
+    XY = X @ Y.T
+    return pt.maximum(X2 - 2.0 * XY + Y2.T, 0.0)
+
+
+def _euclidean_distance(X, Y):
+    """Euclidean distance between rows of X and Y.
+
+    Clamps the squared distance from below to avoid NaN gradients at zero.
+    """
+    return pt.sqrt(pt.maximum(_squared_distance(X, Y), 1e-36))
+
+
+class Stationary(Kernel):
+    """Base class for stationary kernels k(x, y) = f(||x - y|| / ls)."""
+
+    def __init__(self, ls, active_dims=None):
+        self.ls = ls
+        self.active_dims = active_dims
+
+    def _slice_input(self, X):
+        if self.active_dims is not None:
+            return X[:, self.active_dims]
+        return X
+
+    def _scaled_sq_dist(self, X, Y):
+        X = self._slice_input(X) / self.ls
+        Y = self._slice_input(Y) / self.ls
+        return _squared_distance(X, Y)
+
+    def _scaled_euclid_dist(self, X, Y):
+        X = self._slice_input(X) / self.ls
+        Y = self._slice_input(Y) / self.ls
+        return _euclidean_distance(X, Y)
+
+
+class ExpQuad(Stationary):
+    """Exponentiated quadratic (RBF / squared exponential) kernel.
+
+    k(x, y) = exp(-0.5 * ||x - y||^2 / ls^2)
+
+    Scale with multiplication: eta**2 * ExpQuad(ls=ls)
+    """
+
+    def __call__(self, X, Y=None):
+        symmetric = Y is None
+        if symmetric:
+            Y = X
+        K = pt.exp(-0.5 * self._scaled_sq_dist(X, Y))
+        if symmetric:
+            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
+        return K
+
+
+class Matern52(Stationary):
+    """Matern 5/2 kernel.
+
+    k(x, y) = (1 + sqrt(5)*r + 5/3*r^2) * exp(-sqrt(5)*r)
+    where r = ||x - y|| / ls
+    """
+
+    def __call__(self, X, Y=None):
+        symmetric = Y is None
+        if symmetric:
+            Y = X
+        tau = self._scaled_euclid_dist(X, Y)
+        sqrt5 = pt.sqrt(5.0)
+        K = (1.0 + sqrt5 * tau + 5.0 / 3.0 * pt.square(tau)) * pt.exp(-sqrt5 * tau)
+        if symmetric:
+            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
+        return K
+
+
+class Matern32(Stationary):
+    """Matern 3/2 kernel.
+
+    k(x, y) = (1 + sqrt(3)*r) * exp(-sqrt(3)*r)
+    where r = ||x - y|| / ls
+    """
+
+    def __call__(self, X, Y=None):
+        symmetric = Y is None
+        if symmetric:
+            Y = X
+        tau = self._scaled_euclid_dist(X, Y)
+        sqrt3 = pt.sqrt(3.0)
+        K = (1.0 + sqrt3 * tau) * pt.exp(-sqrt3 * tau)
+        if symmetric:
+            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
+        return K
+
+
+class Matern12(Stationary):
+    """Matern 1/2 (Ornstein-Uhlenbeck) kernel.
+
+    k(x, y) = exp(-r)
+    where r = ||x - y|| / ls
+    """
+
+    def __call__(self, X, Y=None):
+        symmetric = Y is None
+        if symmetric:
+            Y = X
+        tau = self._scaled_euclid_dist(X, Y)
+        K = pt.exp(-tau)
+        if symmetric:
+            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
+        return K
