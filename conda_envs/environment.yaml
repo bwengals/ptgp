@@ -19,6 +19,8 @@ dependencies:
     - seaborn
     - pandas
     - scikit-learn
+    - pre-commit
+    - pytest
     #- arviz  # installed via pip (arviz 1.x + arviz-base + arviz-plots)
     - pip
     - pip:
