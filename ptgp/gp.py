@@ -50,12 +50,11 @@ class GP:
         Kns = self.kernel(X_train, X_new)  # (N, N*)
         Kss_diag = self.kernel_diag(X_new)
 
-        mu_train = self.mean(X_train)
-        alpha = pt.linalg.solve(Knn_noisy, y_train - mu_train)
+        Knn_inv = pt.linalg.inv(Knn_noisy)
 
-        fmean = self.mean(X_new) + Kns.T @ alpha
-        v = pt.linalg.solve(Knn_noisy, Kns)
-        fvar = Kss_diag - pt.sum(Kns * v, axis=0)
+        mu_train = self.mean(X_train)
+        fmean = self.mean(X_new) + Kns.T @ Knn_inv @ (y_train - mu_train)
+        fvar = Kss_diag - pt.sum(Kns * (Knn_inv @ Kns), axis=0)
 
         if incl_lik:
             return self.likelihood.predict_mean_and_var(fmean, fvar)
