@@ -22,7 +22,7 @@ dependencies:
     #- arviz  # installed via pip (arviz 1.x + arviz-base + arviz-plots)
     - pip
     - pip:
-        - git+https://github.com/pymc-devs/pytensor@assumption-system
+        - git+https://github.com/jessegrabowski/pytensor@assumption-system
         - git+https://github.com/pymc-devs/pymc@v6
         - "arviz>=1,<2"
         - arviz-base

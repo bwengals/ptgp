@@ -1,6 +1,5 @@
 """Tests for ptgp.optim — native PyTensor training and prediction."""
 
-import sys
 import numpy as np
 import pymc as pm
 import pytensor.tensor as pt
@@ -94,7 +93,6 @@ def test_compile_predict_gp(gp_data):
 
 def test_compile_training_step_svgp(svgp_data):
     """SVGP trains with variational parameters as extra_vars."""
-    sys.setrecursionlimit(50000)
     X, y = svgp_data
     M = 15
 
