@@ -5,7 +5,7 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 
-from ptgp.kernels import ExpQuad, Matern52, Matern32
+from ptgp.kernels import ExpQuad, Matern32, Matern52
 
 
 def _ptgp_eval(kernel, X_np, Y_np=None):
@@ -45,4 +45,6 @@ class TestCombination:
     def test_sum_cross_covariance(self, X_1d, X_1d_other):
         k1, k2 = ExpQuad(ls=1.0), Matern32(ls=1.5)
         K_sum = _ptgp_eval(k1 + k2, X_1d, X_1d_other)
-        np.testing.assert_allclose(K_sum, _ptgp_eval(k1, X_1d, X_1d_other) + _ptgp_eval(k2, X_1d, X_1d_other), atol=1e-14)
+        np.testing.assert_allclose(
+            K_sum, _ptgp_eval(k1, X_1d, X_1d_other) + _ptgp_eval(k2, X_1d, X_1d_other), atol=1e-14
+        )

@@ -17,17 +17,29 @@ class TestStudentT:
         mu, var = np.array([0.0, 0.5]), np.array([0.1, 0.3])
         y, sigma = np.array([0.1, 0.4]), 0.5
 
-        ve_gauss = _eval(Gaussian(sigma).variational_expectation(
-            pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)))
-        ve_student = _eval(StudentT(nu=1000.0, sigma=sigma).variational_expectation(
-            pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)))
+        ve_gauss = _eval(
+            Gaussian(sigma).variational_expectation(
+                pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)
+            )
+        )
+        ve_student = _eval(
+            StudentT(nu=1000.0, sigma=sigma).variational_expectation(
+                pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)
+            )
+        )
 
         np.testing.assert_allclose(ve_student, ve_gauss, atol=1e-2)
 
     def test_quadrature_convergence(self):
         mu, var, y = np.array([0.0]), np.array([1.0]), np.array([0.5])
-        ve_20 = _eval(StudentT(nu=5.0, sigma=1.0, n_points=20).variational_expectation(
-            pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)))
-        ve_50 = _eval(StudentT(nu=5.0, sigma=1.0, n_points=50).variational_expectation(
-            pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)))
+        ve_20 = _eval(
+            StudentT(nu=5.0, sigma=1.0, n_points=20).variational_expectation(
+                pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)
+            )
+        )
+        ve_50 = _eval(
+            StudentT(nu=5.0, sigma=1.0, n_points=50).variational_expectation(
+                pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)
+            )
+        )
         np.testing.assert_allclose(ve_20, ve_50, atol=1e-6)

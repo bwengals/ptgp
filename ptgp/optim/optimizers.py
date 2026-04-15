@@ -43,10 +43,12 @@ def adam(loss, params, learning_rate=1e-3, beta1=0.9, beta2=0.999, epsilon=1e-8)
     for param, g_t in zip(params, grads):
         value = param.get_value(borrow=True)
         m_prev = pytensor.shared(
-            np.zeros(value.shape, dtype=value.dtype), shape=param.type.shape,
+            np.zeros(value.shape, dtype=value.dtype),
+            shape=param.type.shape,
         )
         v_prev = pytensor.shared(
-            np.zeros(value.shape, dtype=value.dtype), shape=param.type.shape,
+            np.zeros(value.shape, dtype=value.dtype),
+            shape=param.type.shape,
         )
 
         m_t = beta1 * m_prev + (one - beta1) * g_t

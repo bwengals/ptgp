@@ -28,11 +28,13 @@ class NegativeBinomial(Likelihood):
     def _log_prob(self, f, y):
         mu = self.invlink(f)
         alpha = self.alpha
-        return (pt.gammaln(y + alpha)
-                - pt.gammaln(alpha)
-                - pt.gammaln(y + 1.0)
-                + alpha * pt.log(alpha / (alpha + mu))
-                + y * pt.log(mu / (alpha + mu)))
+        return (
+            pt.gammaln(y + alpha)
+            - pt.gammaln(alpha)
+            - pt.gammaln(y + 1.0)
+            + alpha * pt.log(alpha / (alpha + mu))
+            + y * pt.log(mu / (alpha + mu))
+        )
 
     def _conditional_mean(self, f):
         return self.invlink(f)

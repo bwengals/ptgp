@@ -42,9 +42,11 @@ class TestGaussKL:
         q_mu = rng.standard_normal(M)
         q_sqrt = np.eye(M) * 0.5
 
-        kl = _eval(gauss_kl(
-            pt.as_tensor_variable(q_mu),
-            pt.as_tensor_variable(q_sqrt),
-            K=pt.as_tensor_variable(K),
-        ))
+        kl = _eval(
+            gauss_kl(
+                pt.as_tensor_variable(q_mu),
+                pt.as_tensor_variable(q_sqrt),
+                K=pt.as_tensor_variable(K),
+            )
+        )
         assert kl > 0.0

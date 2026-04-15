@@ -8,6 +8,7 @@ import numpy as np
 import pymc as pm
 import pytensor
 import pytensor.tensor as pt
+
 from pytensor.graph.replace import graph_replace
 
 from ptgp.optim.optimizers import adam
@@ -29,15 +30,14 @@ def _make_shared_params(pm_model, extra_vars=None, extra_init=None):
     shared_params = {}
     for vv in pm_model.continuous_value_vars:
         shared_params[vv] = pytensor.shared(
-            np.asarray(ip[vv.name], dtype=np.float64), name=vv.name,
+            np.asarray(ip[vv.name], dtype=np.float64),
+            name=vv.name,
         )
 
     shared_extras = []
     if extra_vars is not None:
         for var, init in zip(extra_vars, extra_init):
-            shared_extras.append(
-                pytensor.shared(np.asarray(init, dtype=np.float64), name=var.name)
-            )
+            shared_extras.append(pytensor.shared(np.asarray(init, dtype=np.float64), name=var.name))
 
     all_shared = list(shared_params.values()) + shared_extras
     return shared_params, shared_extras, all_shared
@@ -63,7 +63,10 @@ def _replace_graph(outputs, pm_model, shared_params, extra_vars=None, shared_ext
 
 
 def compile_training_step(
-    objective_fn, gp_model, X_var, y_var,
+    objective_fn,
+    gp_model,
+    X_var,
+    y_var,
     pm_model=None,
     optimizer_fn=None,
     extra_vars=None,
@@ -111,18 +114,26 @@ def compile_training_step(
         optimizer_fn = adam
 
     shared_params, shared_extras, all_shared = _make_shared_params(
-        pm_model, extra_vars, extra_init,
+        pm_model,
+        extra_vars,
+        extra_init,
     )
 
     loss = -objective_fn(gp_model, X_var, y_var)
     [loss_replaced] = _replace_graph(
-        [loss], pm_model, shared_params, extra_vars, shared_extras,
+        [loss],
+        pm_model,
+        shared_params,
+        extra_vars,
+        shared_extras,
     )
 
     updates = optimizer_fn(loss_replaced, all_shared, **optimizer_kwargs)
 
     train_step = pytensor.function(
-        [X_var, y_var], loss_replaced, updates=updates,
+        [X_var, y_var],
+        loss_replaced,
+        updates=updates,
     )
     return train_step, shared_params, shared_extras
 
@@ -152,9 +163,17 @@ def get_trained_params(pm_model, shared_params):
     return result
 
 
-def compile_predict(gp_model, X_new_var, pm_model, shared_params,
-                    extra_vars=None, shared_extras=None,
-                    X_train=None, y_train=None, incl_lik=False):
+def compile_predict(
+    gp_model,
+    X_new_var,
+    pm_model,
+    shared_params,
+    extra_vars=None,
+    shared_extras=None,
+    X_train=None,
+    y_train=None,
+    incl_lik=False,
+):
     """Compile a prediction function that reads trained shared parameters.
 
     Parameters
@@ -194,7 +213,11 @@ def compile_predict(gp_model, X_new_var, pm_model, shared_params,
         mean, var = gp_model.predict(X_new_var, incl_lik=incl_lik)
 
     [mean_s, var_s] = _replace_graph(
-        [mean, var], pm_model, shared_params, extra_vars, shared_extras,
+        [mean, var],
+        pm_model,
+        shared_params,
+        extra_vars,
+        shared_extras,
     )
 
     return pytensor.function([X_new_var], [mean_s, var_s])

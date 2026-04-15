@@ -4,8 +4,8 @@ import numpy as np
 import pytensor
 import pytensor.tensor as pt
 
-from ptgp.kernels import ExpQuad
 from ptgp.conditionals import base_conditional
+from ptgp.kernels import ExpQuad
 
 
 def _eval(*tensors):
@@ -51,10 +51,18 @@ class TestBaseConditional:
         Kmn = kernel(pt.as_tensor_variable(Z), pt.as_tensor_variable(X))
         Knn_diag = pt.diag(kernel(pt.as_tensor_variable(X)))
 
-        _, fvar_delta = _eval(*base_conditional(
-            Kmn, Kmm, Knn_diag, pt.as_tensor_variable(f), white=True))
-        _, fvar_q = _eval(*base_conditional(
-            Kmn, Kmm, Knn_diag, pt.as_tensor_variable(f),
-            q_sqrt=pt.as_tensor_variable(q_sqrt), white=True))
+        _, fvar_delta = _eval(
+            *base_conditional(Kmn, Kmm, Knn_diag, pt.as_tensor_variable(f), white=True)
+        )
+        _, fvar_q = _eval(
+            *base_conditional(
+                Kmn,
+                Kmm,
+                Knn_diag,
+                pt.as_tensor_variable(f),
+                q_sqrt=pt.as_tensor_variable(q_sqrt),
+                white=True,
+            )
+        )
 
         assert np.all(fvar_q >= fvar_delta - 1e-10)

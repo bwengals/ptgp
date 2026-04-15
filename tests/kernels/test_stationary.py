@@ -8,11 +8,15 @@ import pytest
 
 from gpjax.kernels.stationary import (
     RBF as GPJaxRBF,
-    Matern52 as GPJaxMatern52,
+)
+from gpjax.kernels.stationary import (
     Matern32 as GPJaxMatern32,
 )
+from gpjax.kernels.stationary import (
+    Matern52 as GPJaxMatern52,
+)
 
-from ptgp.kernels import ExpQuad, Matern52, Matern32, Matern12
+from ptgp.kernels import ExpQuad, Matern12, Matern32, Matern52
 
 # GPJax uses float32 internally, so comparisons are limited to ~1e-6 precision.
 ATOL = 1e-5
@@ -33,10 +37,12 @@ def _gpjax_gram(kernel, X_np):
 
 
 def _gpjax_cross(kernel, X_np, Y_np):
-    return np.array(kernel.cross_covariance(
-        jnp.array(X_np, dtype=jnp.float32),
-        jnp.array(Y_np, dtype=jnp.float32),
-    ))
+    return np.array(
+        kernel.cross_covariance(
+            jnp.array(X_np, dtype=jnp.float32),
+            jnp.array(Y_np, dtype=jnp.float32),
+        )
+    )
 
 
 @pytest.fixture
@@ -72,7 +78,9 @@ class TestExpQuad:
         ls, eta = 1.5, 2.0
         ptgp_k = eta**2 * ExpQuad(ls=ls)
         gpjax_k = GPJaxRBF(lengthscale=jnp.array(ls), variance=jnp.array(eta**2))
-        np.testing.assert_allclose(_ptgp_eval(ptgp_k, X_1d, X_1d_other), _gpjax_cross(gpjax_k, X_1d, X_1d_other), atol=ATOL)
+        np.testing.assert_allclose(
+            _ptgp_eval(ptgp_k, X_1d, X_1d_other), _gpjax_cross(gpjax_k, X_1d, X_1d_other), atol=ATOL
+        )
 
     def test_gram_2d(self, X_2d):
         ptgp_k = ExpQuad(ls=0.8)
@@ -83,6 +91,7 @@ class TestExpQuad:
         X_pt = pt.as_tensor_variable(X_1d)
         K = ExpQuad(ls=1.0)(X_pt)
         from pytensor.tensor.assumptions.specify import SpecifyAssumptions
+
         assert isinstance(K.owner.op, SpecifyAssumptions)
         assert "symmetric" in K.owner.op.assumptions
         assert "positive_definite" in K.owner.op.assumptions
@@ -92,6 +101,7 @@ class TestExpQuad:
         Y_pt = pt.as_tensor_variable(X_1d_other)
         K = ExpQuad(ls=1.0)(X_pt, Y_pt)
         from pytensor.tensor.assumptions.specify import SpecifyAssumptions
+
         assert not isinstance(K.owner.op, SpecifyAssumptions)
 
 
@@ -106,7 +116,9 @@ class TestMatern52:
         ls, eta = 1.2, 1.5
         ptgp_k = eta**2 * Matern52(ls=ls)
         gpjax_k = GPJaxMatern52(lengthscale=jnp.array(ls), variance=jnp.array(eta**2))
-        np.testing.assert_allclose(_ptgp_eval(ptgp_k, X_1d, X_1d_other), _gpjax_cross(gpjax_k, X_1d, X_1d_other), atol=ATOL)
+        np.testing.assert_allclose(
+            _ptgp_eval(ptgp_k, X_1d, X_1d_other), _gpjax_cross(gpjax_k, X_1d, X_1d_other), atol=ATOL
+        )
 
     def test_gram_2d(self, X_2d):
         ls, eta = 0.5, 2.0
@@ -125,7 +137,9 @@ class TestMatern32:
         ls, eta = 0.7, 1.3
         ptgp_k = eta**2 * Matern32(ls=ls)
         gpjax_k = GPJaxMatern32(lengthscale=jnp.array(ls), variance=jnp.array(eta**2))
-        np.testing.assert_allclose(_ptgp_eval(ptgp_k, X_2d, X_2d_other), _gpjax_cross(gpjax_k, X_2d, X_2d_other), atol=ATOL)
+        np.testing.assert_allclose(
+            _ptgp_eval(ptgp_k, X_2d, X_2d_other), _gpjax_cross(gpjax_k, X_2d, X_2d_other), atol=ATOL
+        )
 
 
 class TestMatern12:
@@ -149,4 +163,6 @@ class TestActiveDims:
     def test_active_dims_selects_columns(self, X_2d):
         k_2d = ExpQuad(ls=1.0, active_dims=[0])
         k_1d = ExpQuad(ls=1.0)
-        np.testing.assert_allclose(_ptgp_eval(k_2d, X_2d), _ptgp_eval(k_1d, X_2d[:, :1]), atol=1e-14)
+        np.testing.assert_allclose(
+            _ptgp_eval(k_2d, X_2d), _ptgp_eval(k_1d, X_2d[:, :1]), atol=1e-14
+        )
