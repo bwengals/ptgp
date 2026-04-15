@@ -1,4 +1,4 @@
-"""Kernel tests against GPJax reference implementation."""
+"""Stationary kernel tests against GPJax reference implementation."""
 
 import jax.numpy as jnp
 import numpy as np
@@ -12,7 +12,7 @@ from gpjax.kernels.stationary import (
     Matern32 as GPJaxMatern32,
 )
 
-from ptgp.kernels import ExpQuad, Matern52, Matern32, Matern12, RandomWalk
+from ptgp.kernels import ExpQuad, Matern52, Matern32, Matern12
 
 # GPJax uses float32 internally, so comparisons are limited to ~1e-6 precision.
 ATOL = 1e-5
@@ -145,50 +145,8 @@ class TestMatern12:
         assert _ptgp_eval(Matern12(ls=1.0), X_1d, X_1d_other).shape == (20, 10)
 
 
-class TestCombination:
-    def test_sum_kernel(self, X_1d):
-        k1, k2 = ExpQuad(ls=1.0), 0.25 * Matern52(ls=2.0)
-        K_sum = _ptgp_eval(k1 + k2, X_1d)
-        np.testing.assert_allclose(K_sum, _ptgp_eval(k1, X_1d) + _ptgp_eval(k2, X_1d), atol=1e-14)
-
-    def test_product_kernel(self, X_1d):
-        k1, k2 = ExpQuad(ls=1.0), Matern52(ls=2.0)
-        K_prod = _ptgp_eval(k1 * k2, X_1d)
-        np.testing.assert_allclose(K_prod, _ptgp_eval(k1, X_1d) * _ptgp_eval(k2, X_1d), atol=1e-14)
-
-    def test_scalar_multiply(self, X_1d):
-        k = ExpQuad(ls=1.0)
-        np.testing.assert_allclose(_ptgp_eval(3.0 * k, X_1d), 3.0 * _ptgp_eval(k, X_1d), atol=1e-14)
-
-    def test_sum_cross_covariance(self, X_1d, X_1d_other):
-        k1, k2 = ExpQuad(ls=1.0), Matern32(ls=1.5)
-        K_sum = _ptgp_eval(k1 + k2, X_1d, X_1d_other)
-        np.testing.assert_allclose(K_sum, _ptgp_eval(k1, X_1d, X_1d_other) + _ptgp_eval(k2, X_1d, X_1d_other), atol=1e-14)
-
-
 class TestActiveDims:
     def test_active_dims_selects_columns(self, X_2d):
         k_2d = ExpQuad(ls=1.0, active_dims=[0])
         k_1d = ExpQuad(ls=1.0)
         np.testing.assert_allclose(_ptgp_eval(k_2d, X_2d), _ptgp_eval(k_1d, X_2d[:, :1]), atol=1e-14)
-
-
-class TestRandomWalk:
-    def test_gram_values(self):
-        X = np.array([[1.0], [2.0], [3.0]])
-        np.testing.assert_allclose(_ptgp_eval(RandomWalk(), X), np.minimum(X, X.T), atol=1e-14)
-
-    def test_scaling(self):
-        X = np.array([[1.0], [2.0], [3.0]])
-        np.testing.assert_allclose(_ptgp_eval(4.0 * RandomWalk(), X), 4.0 * np.minimum(X, X.T), atol=1e-14)
-
-    def test_cross(self):
-        X = np.array([[1.0], [3.0]])
-        Y = np.array([[2.0], [4.0]])
-        K = _ptgp_eval(RandomWalk(), X, Y)
-        np.testing.assert_allclose(K, np.minimum(X, Y.T), atol=1e-14)
-
-    def test_positive_definite(self):
-        X = np.linspace(0.1, 5.0, 20)[:, None]
-        eigvals = np.linalg.eigvalsh(_ptgp_eval(RandomWalk(), X))
-        assert np.all(eigvals > -1e-10)

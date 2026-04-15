@@ -1,4 +1,4 @@
-"""Tests for ptgp.optim — native PyTensor training and prediction."""
+"""Tests for ptgp.optim.training — native PyTensor training and prediction."""
 
 import numpy as np
 import pymc as pm

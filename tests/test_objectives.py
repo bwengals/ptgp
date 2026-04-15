@@ -1,6 +1,5 @@
-"""Tests for objectives, KL divergence, and conditionals."""
+"""Tests for the objectives in ptgp.objectives."""
 
-import jax.numpy as jnp
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
@@ -13,8 +12,6 @@ from ptgp.inducing_variables import InducingPoints
 from ptgp.gp import GP
 from ptgp.svgp import SVGP
 from ptgp.vfe import VFE
-from ptgp.kl import gauss_kl
-from ptgp.conditionals import base_conditional
 from ptgp.objectives import marginal_log_likelihood, elbo, collapsed_elbo
 
 
@@ -35,103 +32,6 @@ def regression_data():
 def inducing_points():
     return np.linspace(0.5, 4.5, 5)[:, None].astype(np.float64)
 
-
-# ---------------------------------------------------------------------------
-# KL divergence
-# ---------------------------------------------------------------------------
-
-class TestGaussKL:
-    def test_whitened_zero_mean_identity_cov(self):
-        """KL[N(0, I) || N(0, I)] = 0."""
-        M = 3
-        kl = _eval(gauss_kl(pt.zeros(M), pt.eye(M), K=None))
-        np.testing.assert_allclose(kl, 0.0, atol=1e-10)
-
-    def test_whitened_nonzero_mean(self):
-        """KL should be positive for non-trivial q."""
-        q_mu = pt.as_tensor_variable(np.array([1.0, 0.5, -0.3]))
-        q_sqrt = pt.as_tensor_variable(np.eye(3) * 0.5)
-        kl = _eval(gauss_kl(q_mu, q_sqrt, K=None))
-        assert kl > 0.0
-
-    def test_unwhitened_matches_whitened_with_identity_prior(self):
-        """With K=I, unwhitened should match whitened."""
-        q_mu = pt.as_tensor_variable(np.array([0.5, -0.5]))
-        q_sqrt = pt.as_tensor_variable(np.array([[0.8, 0.0], [0.2, 0.6]]))
-        kl_w = _eval(gauss_kl(q_mu, q_sqrt, K=None))
-        kl_u = _eval(gauss_kl(q_mu, q_sqrt, K=pt.eye(2)))
-        np.testing.assert_allclose(kl_w, kl_u, atol=1e-10)
-
-    def test_unwhitened_positive(self):
-        M = 3
-        rng = np.random.default_rng(0)
-        L = np.tril(rng.standard_normal((M, M)))
-        K = L @ L.T + 0.1 * np.eye(M)
-        q_mu = rng.standard_normal(M)
-        q_sqrt = np.eye(M) * 0.5
-
-        kl = _eval(gauss_kl(
-            pt.as_tensor_variable(q_mu),
-            pt.as_tensor_variable(q_sqrt),
-            K=pt.as_tensor_variable(K),
-        ))
-        assert kl > 0.0
-
-
-# ---------------------------------------------------------------------------
-# Base conditional
-# ---------------------------------------------------------------------------
-
-class TestBaseConditional:
-    def test_prior_conditional_no_q(self):
-        """Without q_sqrt, should return prior conditional p(f*|u=f)."""
-        M, N = 5, 10
-        rng = np.random.default_rng(0)
-        ls = 1.0
-        kernel = ExpQuad(ls=ls)
-
-        Z = rng.uniform(0, 5, (M, 1))
-        X = rng.uniform(0, 5, (N, 1))
-        f = rng.standard_normal(M)
-
-        Kmm = kernel(pt.as_tensor_variable(Z))
-        Kmn = kernel(pt.as_tensor_variable(Z), pt.as_tensor_variable(X))
-        Knn_diag = pt.diag(kernel(pt.as_tensor_variable(X)))
-
-        fmean, fvar = base_conditional(Kmn, Kmm, Knn_diag, pt.as_tensor_variable(f))
-        fm, fv = _eval(fmean, fvar)
-
-        assert fm.shape == (N,)
-        assert fv.shape == (N,)
-        assert np.all(fv >= -1e-6)  # variance should be non-negative
-
-    def test_whitened_adds_variance(self):
-        """Adding q_sqrt should increase variance compared to delta posterior."""
-        M, N = 4, 8
-        rng = np.random.default_rng(1)
-        kernel = ExpQuad(ls=1.0)
-
-        Z = rng.uniform(0, 5, (M, 1))
-        X = rng.uniform(0, 5, (N, 1))
-        f = np.zeros(M)
-        q_sqrt = np.eye(M) * 0.5
-
-        Kmm = kernel(pt.as_tensor_variable(Z))
-        Kmn = kernel(pt.as_tensor_variable(Z), pt.as_tensor_variable(X))
-        Knn_diag = pt.diag(kernel(pt.as_tensor_variable(X)))
-
-        _, fvar_delta = _eval(*base_conditional(
-            Kmn, Kmm, Knn_diag, pt.as_tensor_variable(f), white=True))
-        _, fvar_q = _eval(*base_conditional(
-            Kmn, Kmm, Knn_diag, pt.as_tensor_variable(f),
-            q_sqrt=pt.as_tensor_variable(q_sqrt), white=True))
-
-        assert np.all(fvar_q >= fvar_delta - 1e-10)
-
-
-# ---------------------------------------------------------------------------
-# Marginal log likelihood (exact GP)
-# ---------------------------------------------------------------------------
 
 class TestMarginalLogLikelihood:
     def test_finite(self, regression_data):
@@ -154,10 +54,6 @@ class TestMarginalLogLikelihood:
 
         assert mll_good > mll_bad
 
-
-# ---------------------------------------------------------------------------
-# SVGP ELBO
-# ---------------------------------------------------------------------------
 
 class TestELBO:
     def test_finite(self, regression_data, inducing_points):
@@ -228,10 +124,6 @@ class TestELBO:
 
         assert elbo_val <= mll_val + 1e-6  # ELBO <= MLL
 
-
-# ---------------------------------------------------------------------------
-# Collapsed ELBO (VFE)
-# ---------------------------------------------------------------------------
 
 class TestCollapsedELBO:
     def test_finite(self, regression_data, inducing_points):
