@@ -154,7 +154,7 @@ def get_trained_params(pm_model, shared_params):
 
 def compile_predict(gp_model, X_new_var, pm_model, shared_params,
                     extra_vars=None, shared_extras=None,
-                    X_train=None, y_train=None):
+                    X_train=None, y_train=None, incl_lik=False):
     """Compile a prediction function that reads trained shared parameters.
 
     Parameters
@@ -175,23 +175,26 @@ def compile_predict(gp_model, X_new_var, pm_model, shared_params,
         Training inputs (required for GP and VFE).
     y_train : ndarray, optional
         Training targets (required for GP and VFE).
+    incl_lik : bool
+        If True, include likelihood noise in the predictions.
 
     Returns
     -------
-    predictn : callable
+    predict_fn : callable
         ``(X_new) -> (mean, var)`` using the trained parameter values.
     """
     if X_train is not None:
-        fmean, fvar = gp_model.predict(
+        mean, var = gp_model.predict(
             X_new_var,
             pt.as_tensor_variable(X_train),
             pt.as_tensor_variable(y_train),
+            incl_lik=incl_lik,
         )
     else:
-        fmean, fvar = gp_model.predict(X_new_var)
+        mean, var = gp_model.predict(X_new_var, incl_lik=incl_lik)
 
-    [fmean_s, fvar_s] = _replace_graph(
-        [fmean, fvar], pm_model, shared_params, extra_vars, shared_extras,
+    [mean_s, var_s] = _replace_graph(
+        [mean, var], pm_model, shared_params, extra_vars, shared_extras,
     )
 
-    return pytensor.function([X_new_var], [fmean_s, fvar_s])
+    return pytensor.function([X_new_var], [mean_s, var_s])
