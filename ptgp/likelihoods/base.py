@@ -48,9 +48,15 @@ class Likelihood:
 
         Default: Gauss-Hermite quadrature.
         """
-        E_mean = self._gauss_hermite(lambda f, _: self._conditional_mean(f), pt.zeros_like(mu), mu, var)
-        E_mean_sq = self._gauss_hermite(lambda f, _: self._conditional_mean(f)**2, pt.zeros_like(mu), mu, var)
-        E_var = self._gauss_hermite(lambda f, _: self._conditional_variance(f), pt.zeros_like(mu), mu, var)
+        E_mean = self._gauss_hermite(
+            lambda f, _: self._conditional_mean(f), pt.zeros_like(mu), mu, var
+        )
+        E_mean_sq = self._gauss_hermite(
+            lambda f, _: self._conditional_mean(f) ** 2, pt.zeros_like(mu), mu, var
+        )
+        E_var = self._gauss_hermite(
+            lambda f, _: self._conditional_variance(f), pt.zeros_like(mu), mu, var
+        )
         return E_mean, E_var + E_mean_sq - E_mean**2
 
     def predict_log_density(self, y, mu, var):

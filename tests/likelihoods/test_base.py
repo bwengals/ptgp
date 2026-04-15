@@ -18,10 +18,16 @@ class TestConfigurableLink:
         mu, var = np.array([0.0, 1.0]), np.array([0.5, 0.5])
         y = np.array([1.0, 0.0])
 
-        ve_probit = _eval(Bernoulli().variational_expectation(
-            pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)))
-        ve_logit = _eval(Bernoulli(invlink=pt.sigmoid).variational_expectation(
-            pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)))
+        ve_probit = _eval(
+            Bernoulli().variational_expectation(
+                pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)
+            )
+        )
+        ve_logit = _eval(
+            Bernoulli(invlink=pt.sigmoid).variational_expectation(
+                pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)
+            )
+        )
 
         assert np.all(ve_probit < 0) and np.all(ve_logit < 0)
         assert not np.allclose(ve_probit, ve_logit)
@@ -31,7 +37,12 @@ class TestConfigurableLink:
         mu, var = np.array([1.0]), np.array([0.1])
         y = np.array([2.0])
 
-        softplus = lambda f: pt.log1p(pt.exp(f))
-        ve = _eval(Poisson(invlink=softplus).variational_expectation(
-            pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)))
+        def softplus(f):
+            return pt.log1p(pt.exp(f))
+
+        ve = _eval(
+            Poisson(invlink=softplus).variational_expectation(
+                pt.as_tensor_variable(y), pt.as_tensor_variable(mu), pt.as_tensor_variable(var)
+            )
+        )
         assert np.isfinite(ve).all()

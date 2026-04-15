@@ -23,7 +23,9 @@ class TestRandomWalk:
 
     def test_scaling(self):
         X = np.array([[1.0], [2.0], [3.0]])
-        np.testing.assert_allclose(_ptgp_eval(4.0 * RandomWalk(), X), 4.0 * np.minimum(X, X.T), atol=1e-14)
+        np.testing.assert_allclose(
+            _ptgp_eval(4.0 * RandomWalk(), X), 4.0 * np.minimum(X, X.T), atol=1e-14
+        )
 
     def test_cross(self):
         X = np.array([[1.0], [3.0]])

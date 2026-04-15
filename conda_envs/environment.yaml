@@ -22,6 +22,7 @@ dependencies:
     - pre-commit
     - pytest
     #- arviz  # installed via pip (arviz 1.x + arviz-base + arviz-plots)
+    - pymc
     - pip
     - pip:
         - git+https://github.com/jessegrabowski/pytensor@assumption-system

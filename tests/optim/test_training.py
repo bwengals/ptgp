@@ -40,8 +40,12 @@ def test_compile_training_step_gp(gp_data):
     y_var = pt.vector("y")
 
     train_step, shared_params, shared_extras = pg.compile_training_step(
-        pg.marginal_log_likelihood, gp, X_var, y_var,
-        pm_model=model, learning_rate=1e-2,
+        pg.marginal_log_likelihood,
+        gp,
+        X_var,
+        y_var,
+        pm_model=model,
+        learning_rate=1e-2,
     )
 
     losses = []
@@ -68,8 +72,12 @@ def test_compile_predict_gp(gp_data):
     y_var = pt.vector("y")
 
     train_step, shared_params, shared_extras = pg.compile_training_step(
-        pg.marginal_log_likelihood, gp, X_var, y_var,
-        pm_model=model, learning_rate=1e-2,
+        pg.marginal_log_likelihood,
+        gp,
+        X_var,
+        y_var,
+        pm_model=model,
+        learning_rate=1e-2,
     )
 
     for _ in range(200):
@@ -77,8 +85,12 @@ def test_compile_predict_gp(gp_data):
 
     X_new_var = pt.matrix("X_new")
     predict_fn = pg.compile_predict(
-        gp, X_new_var, model, shared_params,
-        X_train=X, y_train=y,
+        gp,
+        X_new_var,
+        model,
+        shared_params,
+        X_train=X,
+        y_train=y,
     )
 
     X_test = np.linspace(0, 5, 20)[:, None]
@@ -120,7 +132,10 @@ def test_compile_training_step_svgp(svgp_data):
     y_var = pt.vector("y")
 
     train_step, shared_params, shared_extras = pg.compile_training_step(
-        pg.elbo, svgp, X_var, y_var,
+        pg.elbo,
+        svgp,
+        X_var,
+        y_var,
         pm_model=model,
         extra_vars=[q_mu_var, q_sqrt_var],
         extra_init=[np.zeros(M), np.eye(M)],
@@ -151,7 +166,10 @@ def test_sgd_optimizer(gp_data):
     y_var = pt.vector("y")
 
     train_step, shared_params, shared_extras = pg.compile_training_step(
-        pg.marginal_log_likelihood, gp, X_var, y_var,
+        pg.marginal_log_likelihood,
+        gp,
+        X_var,
+        y_var,
         pm_model=model,
         optimizer_fn=pg.sgd,
         learning_rate=1e-3,

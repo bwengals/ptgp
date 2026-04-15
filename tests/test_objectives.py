@@ -5,14 +5,14 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 
+from ptgp.gp import GP
+from ptgp.inducing_variables import InducingPoints
 from ptgp.kernels import ExpQuad
 from ptgp.likelihoods import Gaussian
 from ptgp.mean import Zero
-from ptgp.inducing_variables import InducingPoints
-from ptgp.gp import GP
+from ptgp.objectives import collapsed_elbo, elbo, marginal_log_likelihood
 from ptgp.svgp import SVGP
 from ptgp.vfe import VFE
-from ptgp.objectives import marginal_log_likelihood, elbo, collapsed_elbo
 
 
 def _eval(*tensors):
@@ -37,8 +37,7 @@ class TestMarginalLogLikelihood:
     def test_finite(self, regression_data):
         X, y = regression_data
         gp = GP(kernel=ExpQuad(ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
-        mll = _eval(marginal_log_likelihood(gp,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        mll = _eval(marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(mll)
 
     def test_better_fit_higher_mll(self, regression_data):
@@ -47,10 +46,12 @@ class TestMarginalLogLikelihood:
         gp_good = GP(kernel=ExpQuad(ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
         gp_bad = GP(kernel=ExpQuad(ls=0.01), mean=Zero(), likelihood=Gaussian(sigma=10.0))
 
-        mll_good = _eval(marginal_log_likelihood(gp_good,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
-        mll_bad = _eval(marginal_log_likelihood(gp_bad,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        mll_good = _eval(
+            marginal_log_likelihood(gp_good, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+        )
+        mll_bad = _eval(
+            marginal_log_likelihood(gp_bad, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+        )
 
         assert mll_good > mll_bad
 
@@ -59,22 +60,24 @@ class TestELBO:
     def test_finite(self, regression_data, inducing_points):
         X, y = regression_data
         svgp = SVGP(
-            kernel=ExpQuad(ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1),
+            kernel=ExpQuad(ls=1.0),
+            mean=Zero(),
+            likelihood=Gaussian(sigma=0.1),
             inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
         )
-        elbo_val = _eval(elbo(svgp,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(elbo_val)
 
     def test_unwhitened_finite(self, regression_data, inducing_points):
         X, y = regression_data
         svgp = SVGP(
-            kernel=ExpQuad(ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1),
+            kernel=ExpQuad(ls=1.0),
+            mean=Zero(),
+            likelihood=Gaussian(sigma=0.1),
             inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
             whiten=False,
         )
-        elbo_val = _eval(elbo(svgp,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(elbo_val)
 
     def test_whitened_and_unwhitened_agree_at_prior(self, regression_data, inducing_points):
@@ -86,22 +89,27 @@ class TestELBO:
 
         # Whitened: q_mu=0, q_sqrt=I is the prior q(v)=N(0,I)
         svgp_w = SVGP(
-            kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=0.1),
-            inducing_variable=InducingPoints(Z), whiten=True,
+            kernel=kernel,
+            mean=Zero(),
+            likelihood=Gaussian(sigma=0.1),
+            inducing_variable=InducingPoints(Z),
+            whiten=True,
         )
-        elbo_w = _eval(elbo(svgp_w,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        elbo_w = _eval(elbo(svgp_w, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 
         # Unwhitened: q_mu=0, q_sqrt=Luu is the prior q(u)=N(0, Kuu)
         Kuu = _eval(kernel(Z))
         Luu = np.linalg.cholesky(Kuu)
         svgp_u = SVGP(
-            kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=0.1),
-            inducing_variable=InducingPoints(Z), whiten=False,
-            q_mu=pt.zeros(5), q_sqrt=pt.as_tensor_variable(Luu),
+            kernel=kernel,
+            mean=Zero(),
+            likelihood=Gaussian(sigma=0.1),
+            inducing_variable=InducingPoints(Z),
+            whiten=False,
+            q_mu=pt.zeros(5),
+            q_sqrt=pt.as_tensor_variable(Luu),
         )
-        elbo_u = _eval(elbo(svgp_u,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        elbo_u = _eval(elbo(svgp_u, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 
         np.testing.assert_allclose(elbo_w, elbo_u, atol=1e-6)
 
@@ -112,15 +120,17 @@ class TestELBO:
         kernel = ExpQuad(ls=ls)
 
         gp = GP(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
-        mll_val = _eval(marginal_log_likelihood(gp,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        mll_val = _eval(
+            marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+        )
 
         svgp = SVGP(
-            kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma),
+            kernel=kernel,
+            mean=Zero(),
+            likelihood=Gaussian(sigma=sigma),
             inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
         )
-        elbo_val = _eval(elbo(svgp,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 
         assert elbo_val <= mll_val + 1e-6  # ELBO <= MLL
 
@@ -129,11 +139,12 @@ class TestCollapsedELBO:
     def test_finite(self, regression_data, inducing_points):
         X, y = regression_data
         vfe_model = VFE(
-            kernel=ExpQuad(ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1),
+            kernel=ExpQuad(ls=1.0),
+            mean=Zero(),
+            likelihood=Gaussian(sigma=0.1),
             inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
         )
-        celbo = _eval(collapsed_elbo(vfe_model,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(celbo)
 
     def test_collapsed_elbo_less_than_mll(self, regression_data, inducing_points):
@@ -143,14 +154,16 @@ class TestCollapsedELBO:
         kernel = ExpQuad(ls=ls)
 
         gp = GP(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
-        mll_val = _eval(marginal_log_likelihood(gp,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        mll_val = _eval(
+            marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+        )
 
         vfe_model = VFE(
-            kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma),
+            kernel=kernel,
+            mean=Zero(),
+            likelihood=Gaussian(sigma=sigma),
             inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
         )
-        celbo = _eval(collapsed_elbo(vfe_model,
-            pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 
         assert celbo <= mll_val + 1e-6  # collapsed ELBO <= MLL
