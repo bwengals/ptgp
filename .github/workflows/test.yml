@@ -1,0 +1,53 @@
+name: pytest
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/*"
+      - "ptgp/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "environment.yaml"
+
+# Cancels all previous workflow runs for pull requests that have not completed.
+concurrency:
+  # The concurrency group contains the workflow name and the branch name for pull requests
+  # or the commit hash for any other events.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.13"
+            shell: bash -leo pipefail {0}
+          - os: windows-latest
+            python-version: "3.12"
+            shell: cmd /C call {0}
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment.yaml
+          create-args: >-
+            python=${{ matrix.python-version }}
+          environment-name: ptgp
+          init-shell: ${{ matrix.os == 'windows-latest' && 'cmd.exe' || 'bash' }}
+          cache-environment: true
+      - name: Install ptgp
+        run: |
+          pip install -e .
+          python --version
+      - name: Run tests
+        run: |
+          python -m pytest --color=yes -vv --durations=50 tests/
