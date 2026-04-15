@@ -38,7 +38,7 @@ Issues = "https://github.com/bwengals/ptgp/issues"
 source = 'vcs'
 
 [tool.hatch.build.hooks.vcs]
-version-file = "_version.py"
+version-file = "ptgp/_version.py"
 
 [tool.hatch.build.targets.sdist]
 exclude = [

@@ -1,5 +1,3 @@
-from importlib.metadata import version
-
 from ptgp.gp import GP
 from ptgp.inducing_variables import InducingPoints, InducingVariables
 from ptgp.inference import fit_bfgs, fit_model, make_training_step, make_training_step_model
@@ -73,4 +71,7 @@ __all__ = [
 ]
 
 
-__version__ = version("pymc-extras")
+try:
+    from ptgp._version import __version__
+except ImportError:
+    __version__ = "0.0.0+unknown"
