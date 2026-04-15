@@ -18,7 +18,6 @@ jupyter:
 Test all three models (GP, VFE, SVGP) on synthetic 1D regression data using PyMC priors.
 
 ```python
-import sys
 import numpy as np
 import pymc as pm
 import preliz as pz
@@ -170,8 +169,6 @@ plt.title(f"VFE (M={M})");
 Minibatch training with variational parameters.
 
 ```python
-sys.setrecursionlimit(50000)
-
 M_svgp = 20
 Z_svgp = np.linspace(-0.5, 10.5, M_svgp)[:, None]
 
