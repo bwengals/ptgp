@@ -1,6 +1,5 @@
 import pytensor.tensor as pt
 
-from ptgp.conditionals import base_conditional
 from ptgp.mean import Zero
 
 

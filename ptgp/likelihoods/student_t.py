@@ -26,10 +26,12 @@ class StudentT(Likelihood):
     def _log_prob(self, f, y):
         nu, sigma = self.nu, self.sigma
         z = (y - f) / sigma
-        return (pt.gammaln((nu + 1.0) / 2.0)
-                - pt.gammaln(nu / 2.0)
-                - 0.5 * pt.log(nu * pt.pi * sigma**2)
-                - 0.5 * (nu + 1.0) * pt.log1p(z**2 / nu))
+        return (
+            pt.gammaln((nu + 1.0) / 2.0)
+            - pt.gammaln(nu / 2.0)
+            - 0.5 * pt.log(nu * pt.pi * sigma**2)
+            - 0.5 * (nu + 1.0) * pt.log1p(z**2 / nu)
+        )
 
     def _conditional_mean(self, f):
         return f

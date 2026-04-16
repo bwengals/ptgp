@@ -1,6 +1,3 @@
-import pytensor.tensor as pt
-
-
 class InducingVariables:
     """Base class for inducing variables.
 

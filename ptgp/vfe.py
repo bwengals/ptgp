@@ -1,6 +1,5 @@
 import pytensor.tensor as pt
 
-from ptgp.conditionals import base_conditional
 from ptgp.mean import Zero
 
 
@@ -51,9 +50,9 @@ class VFE:
         Z = self.inducing_variable.Z
         sigma2 = self.likelihood.sigma**2
 
-        Kuu = self.kernel(Z)           # (M, M)
+        Kuu = self.kernel(Z)  # (M, M)
         Kuf = self.kernel(Z, X_train)  # (M, N)
-        Kus = self.kernel(Z, X_new)    # (M, N*)
+        Kus = self.kernel(Z, X_new)  # (M, N*)
         Kss_diag = self.kernel_diag(X_new)
 
         # Sigma = Kuu + Kuf @ Kuf.T / sigma^2
