@@ -26,8 +26,16 @@ class SVGP:
         Initial variational Cholesky factor. Defaults to identity.
     """
 
-    def __init__(self, kernel, mean=None, likelihood=None, inducing_variable=None,
-                 whiten=True, q_mu=None, q_sqrt=None):
+    def __init__(
+        self,
+        kernel,
+        mean=None,
+        likelihood=None,
+        inducing_variable=None,
+        whiten=True,
+        q_mu=None,
+        q_sqrt=None,
+    ):
         self.kernel = kernel
         self.mean = mean if mean is not None else Zero()
         self.likelihood = likelihood

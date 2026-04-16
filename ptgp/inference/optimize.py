@@ -4,14 +4,13 @@
 - ``make_training_step``: Returns a JIT-compiled training step for SVGP (user controls the loop).
 """
 
-import pytensor
-import pytensor.tensor as pt
-import numpy as np
-
 import jax
 import jax.numpy as jnp
-from jax.scipy.optimize import minimize as jax_minimize
+import numpy as np
+import pytensor
+import pytensor.tensor as pt
 
+from jax.scipy.optimize import minimize as jax_minimize
 from pytensor.link.jax.dispatch import jax_funcify
 from pytensor.tensor.assumptions.specify import SpecifyAssumptions
 
@@ -21,6 +20,7 @@ from pytensor.tensor.assumptions.specify import SpecifyAssumptions
 def jax_funcify_SpecifyAssumptions(op, **kwargs):
     def specify_assumptions(x):
         return x
+
     return specify_assumptions
 
 
@@ -39,7 +39,7 @@ def _compile_to_jax(inputs, output):
     callable
         JAX function ``(*inputs) -> scalar``.
     """
-    f_pt = pytensor.function(inputs, output, mode='JAX')
+    f_pt = pytensor.function(inputs, output, mode="JAX")
     fgraph = f_pt.maker.fgraph
     jax_fn_raw = jax_funcify(fgraph)
 
@@ -81,8 +81,8 @@ def fit_bfgs(objective_fn, model, X, y, params, init_values, maxiter=1000):
     result : OptimizeResults
         JAX minimize result (has ``.fun``, ``.x``, ``.success``).
     """
-    X_var = pt.matrix('_X_opt')
-    y_var = pt.vector('_y_opt')
+    X_var = pt.matrix("_X_opt")
+    y_var = pt.vector("_y_opt")
 
     loss = -objective_fn(model, X_var, y_var)
     jax_loss = _compile_to_jax([*params, X_var, y_var], loss)
@@ -97,7 +97,7 @@ def fit_bfgs(objective_fn, model, X, y, params, init_values, maxiter=1000):
         parts = []
         offset = 0
         for shape, size in zip(shapes, sizes):
-            part = jnp.reshape(flat[offset:offset + size], shape) if shape else flat[offset]
+            part = jnp.reshape(flat[offset : offset + size], shape) if shape else flat[offset]
             offset += size
             parts.append(part)
         return parts
@@ -105,8 +105,7 @@ def fit_bfgs(objective_fn, model, X, y, params, init_values, maxiter=1000):
     def packed_loss(flat):
         return jax_loss(*_unpack(flat), X, y)
 
-    result = jax_minimize(packed_loss, x0, method='BFGS',
-                          options={'maxiter': maxiter})
+    result = jax_minimize(packed_loss, x0, method="BFGS", options={"maxiter": maxiter})
 
     opt_values = [np.asarray(v) for v in _unpack(result.x)]
     return opt_values, result
@@ -143,8 +142,8 @@ def fit_model(objective_fn, gp_model, X, y, pm_model=None, maxiter=1000):
 
     pm_model = pm.modelcontext(pm_model)
 
-    X_var = pt.matrix('_X_opt')
-    y_var = pt.vector('_y_opt')
+    X_var = pt.matrix("_X_opt")
+    y_var = pt.vector("_y_opt")
 
     loss = -objective_fn(gp_model, X_var, y_var)
     [loss_replaced] = pm_model.replace_rvs_by_values([loss])
@@ -163,7 +162,7 @@ def fit_model(objective_fn, gp_model, X, y, pm_model=None, maxiter=1000):
         parts = []
         offset = 0
         for shape, size in zip(shapes, sizes):
-            part = jnp.reshape(flat[offset:offset + size], shape) if shape else flat[offset]
+            part = jnp.reshape(flat[offset : offset + size], shape) if shape else flat[offset]
             offset += size
             parts.append(part)
         return parts
@@ -171,8 +170,7 @@ def fit_model(objective_fn, gp_model, X, y, pm_model=None, maxiter=1000):
     def packed_loss(flat):
         return jax_loss(*_unpack(flat), X, y)
 
-    result = jax_minimize(packed_loss, x0, method='BFGS',
-                          options={'maxiter': maxiter})
+    result = jax_minimize(packed_loss, x0, method="BFGS", options={"maxiter": maxiter})
 
     opt_values = _unpack(result.x)
     opt_point = {name: np.asarray(v) for name, v in zip(var_names, opt_values)}
@@ -221,9 +219,7 @@ def make_training_step(objective_fn, model, X_var, y_var, params, optimizer):
 
     @jax.jit
     def step_fn(X_batch, y_batch, param_values, opt_state):
-        loss_val, grads = jax.value_and_grad(f_loss, argnums=2)(
-            X_batch, y_batch, param_values
-        )
+        loss_val, grads = jax.value_and_grad(f_loss, argnums=2)(X_batch, y_batch, param_values)
         updates, opt_state = optimizer.update(grads, opt_state, param_values)
         param_values = optax.apply_updates(param_values, updates)
         return param_values, opt_state, loss_val
@@ -231,8 +227,9 @@ def make_training_step(objective_fn, model, X_var, y_var, params, optimizer):
     return init_fn, step_fn
 
 
-def make_training_step_model(objective_fn, gp_model, X_var, y_var,
-                             extra_params=None, optimizer=None, pm_model=None):
+def make_training_step_model(
+    objective_fn, gp_model, X_var, y_var, extra_params=None, optimizer=None, pm_model=None
+):
     """Create a JIT-compiled SVGP training step using a ``pm.Model()`` context.
 
     Automatically uses PyMC's unconstrained value variables. Additional
@@ -264,8 +261,8 @@ def make_training_step_model(objective_fn, gp_model, X_var, y_var,
         ``(X_batch, y_batch, param_values, opt_state) -> (param_values, opt_state, loss)``
         ``param_values`` is a tuple: ``(*value_var_values, *extra_param_values)``.
     """
-    import pymc as pm
     import optax
+    import pymc as pm
 
     pm_model = pm.modelcontext(pm_model)
     if extra_params is None:
@@ -286,9 +283,7 @@ def make_training_step_model(objective_fn, gp_model, X_var, y_var,
 
     @jax.jit
     def step_fn(X_batch, y_batch, param_values, opt_state):
-        loss_val, grads = jax.value_and_grad(f_loss, argnums=2)(
-            X_batch, y_batch, param_values
-        )
+        loss_val, grads = jax.value_and_grad(f_loss, argnums=2)(X_batch, y_batch, param_values)
         updates, opt_state = optimizer.update(grads, opt_state, param_values)
         param_values = optax.apply_updates(param_values, updates)
         return param_values, opt_state, loss_val
