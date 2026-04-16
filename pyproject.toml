@@ -1,11 +1,102 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "ptgp"
-version = "0.0.1"
-requires-python = ">=3.11"
+authors = [
+    {name = 'Bill Engles', email = 'example@me.com'}
+]
+description = "A practitioner's toolbox for estimating large-scale Gaussian Process models with PyMC and PyTensor"
+requires-python = ">=3.12"
+keywords = [
+    "gaussian processes",
+    "bayesian",
+    "variational inference",
+    "probabilistic programming",
+    "pymc",
+    "pytensor",
+]
+license = {file = "LICENSE"}
+dynamic = ["version"]
+dependencies = [
+  "jax",
+  "optax",
+  "numpy",
+  "pymc",
+  "pytensor"
+]
 
-[tool.setuptools]
-packages = ["ptgp", "ptgp.kernels", "ptgp.likelihoods", "ptgp.inference", "ptgp.optim"]
+[project.optional-dependencies]
+dev = ["pytest", "pre-commit"]
+
+[project.urls]
+Repository = "https://github.com/bwengals/ptgp.git"
+Issues = "https://github.com/bwengals/ptgp/issues"
+
+[tool.hatch.version]
+source = 'vcs'
+
+[tool.hatch.build.hooks.vcs]
+version-file = "ptgp/_version.py"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  '/.github',
+  '/notebooks',
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ptgp"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+xfail_strict = true
+addopts = [
+  "-v",
+  "--doctest-modules",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["D", "E", "F", "I", "UP", "W", "RUF"]
+ignore = [
+  "E501",
+  "RUF001", # String contains ambiguous character (such as Greek letters)
+  "RUF002", # Docstring contains ambiguous character (such as Greek letters)
+  "RUF012", # Mutable class attributes should be annotated with `typing.ClassVar`
+  "D100",
+  "D101",
+  "D102",
+  "D103",
+  "D104",
+  "D105",
+  "D107",
+  "D200",
+  "D202",
+  "D203",
+  "D204",
+  "D205",
+  "D209",
+  "D212",
+  "D213",
+  "D301",
+  "D400",
+  "D401",
+  "D403",
+  "D413",
+  "D415",
+  "D417",
+]
+
+[tool.ruff.lint.isort]
+lines-between-types = 1

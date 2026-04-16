@@ -1,6 +1,3 @@
-import pytensor.tensor as pt
-
-
 class Kernel:
     """Base class for all PTGP kernels.
 
@@ -15,12 +12,15 @@ class Kernel:
 
     def __add__(self, other):
         from ptgp.kernels.combination import SumKernel
+
         return SumKernel(self, other)
 
     def __mul__(self, other):
         from ptgp.kernels.combination import ProductKernel
+
         return ProductKernel(self, other)
 
     def __rmul__(self, other):
         from ptgp.kernels.combination import ProductKernel
+
         return ProductKernel(self, other)
