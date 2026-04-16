@@ -5,6 +5,7 @@ The helper ``make_params`` converts a flat dict of numeric values into
 the parameter formats expected by both PTGP and GPJax so that all tests
 can share a single source of truth for hyperparameter values.
 """
+
 import jax.numpy as jnp
 import pytest
 
@@ -25,4 +26,5 @@ def X_2d():
 @pytest.fixture
 def rng_key():
     import jax
+
     return jax.random.PRNGKey(0)

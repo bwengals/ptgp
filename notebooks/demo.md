@@ -132,7 +132,7 @@ with pm.Model() as vfe_model:
 
 train_step_vfe, shared_params_vfe, shared_extras_vfe = pg.compile_training_step(
     pg.collapsed_elbo, vfe, X_var, y_var,
-    pm_model=vfe_model, 
+    pm_model=vfe_model,
     extra_vars=[Z_var],
     extra_init=[Z_init],
     learning_rate=1e-2,

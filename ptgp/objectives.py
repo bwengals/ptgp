@@ -1,7 +1,5 @@
 import pytensor.tensor as pt
 
-from ptgp.kl import gauss_kl
-
 
 def marginal_log_likelihood(gp, X, y):
     """Exact GP log marginal likelihood.
@@ -97,7 +95,7 @@ def collapsed_elbo(vfe, X, y):
     mu = vfe.mean(X)
     Kff_diag = vfe.kernel_diag(X)
     Kuf = vfe.kernel(Z, X)  # (M, N)
-    Kuu = vfe.kernel(Z)     # (M, M)
+    Kuu = vfe.kernel(Z)  # (M, M)
 
     Kuu_inv = pt.linalg.inv(Kuu)
 
