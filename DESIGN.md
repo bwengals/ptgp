@@ -175,11 +175,51 @@ Enables scaling via CG-based solves, lazy kernel matrix-vector products, and Lan
 9. ~~`ptgp/svgp.py`~~ ✓
 10. ~~`ptgp/optim/`~~ ✓
 
+## Multi-Output GPs (planned)
+
+Following GPflow's architecture. Data convention: `X (N, D)`, `Y (N, P)` where P is the number of outputs, L is the number of latent GPs.
+
+### Multi-output kernels
+
+Wrappers that produce per-output or per-latent covariance matrices:
+
+- `SharedIndependent(kernel, output_dim)` — same kernel for all outputs. Returns `(P, N, N)`.
+- `SeparateIndependent([k1, k2, ...])` — different kernel per output. Returns `(P, N, N)`.
+- `LinearCoregionalization(kernels, W)` — L latent GPs mixed through a `(P, L)` weight matrix W. The key multi-output model for correlated outputs.
+
+### Multi-output inducing variables
+
+- `SharedIndependentInducingVariables(iv)` — same Z `(M, D)` for all latent GPs.
+- `SeparateIndependentInducingVariables([iv1, iv2, ...])` — different Z per latent GP.
+
+### Conditionals dispatch
+
+A dispatch layer above `base_conditional` selects the right implementation based on (kernel type, inducing variable type):
+
+- **SharedIndependent + SharedInducing**: call `base_conditional` once, broadcast across P outputs.
+- **SeparateIndependent + SeparateInducing**: call `base_conditional` L times, one per latent GP.
+- **LinearCoregionalization**: call `base_conditional` L times for latent GPs, then mix with `f = W @ g`.
+
+The existing `base_conditional` handles single-output math and does not change.
+
+### Variational parameter shapes
+
+- `q_mu`: `(M, L)` — variational mean per latent GP.
+- `q_sqrt`: `(L, M, M)` — Cholesky factor per latent GP.
+- `gauss_kl` extends to sum L independent KL terms.
+
+### Build order
+
+1. `SharedIndependent` + `SeparateIndependent` kernels (independent outputs)
+2. Corresponding inducing variable types
+3. Dispatch layer above `base_conditional`
+4. Extend `gauss_kl` to sum over L latent GPs
+5. `LinearCoregionalization` for correlated outputs
+
 ## Future Directions
 
 - Upstream `ptgp/linalg/` to PyTensor
 - PyMC to depend on PTGP for GP kernels
-- Fix assumption-system recursion depth issue upstream in PyTensor
 - Toeplitz structured matrix support
 - Sparse kernel support
 - Natural/expectation variational parameterizations
