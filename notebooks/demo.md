@@ -91,14 +91,21 @@ predict_gp = pg.compile_predict(
     gp, X_new_var, gp_model, shared_params,
     X_train=X_train, y_train=y_train,
 )
+predict_gp_y = pg.compile_predict(
+    gp, X_new_var, gp_model, shared_params,
+    X_train=X_train, y_train=y_train, incl_lik=True,
+)
 
 mu_gp, var_gp = predict_gp(X_test)
+_, var_gp_y = predict_gp_y(X_test)
 sd_gp = np.sqrt(var_gp)
+sd_gp_y = np.sqrt(var_gp_y)
 
 plt.figure(figsize=(10, 4))
 plt.scatter(X_train, y_train, s=10, c="k", zorder=3, label="data")
-plt.plot(X_test, mu_gp, label="GP mean")
-plt.fill_between(X_test.ravel(), mu_gp - 2*sd_gp, mu_gp + 2*sd_gp, alpha=0.2, label="GP 2 sd")
+plt.plot(X_test, mu_gp, "C0", label="GP mean")
+plt.fill_between(X_test.ravel(), mu_gp - 2*sd_gp_y, mu_gp + 2*sd_gp_y, alpha=0.1, color="C0", label="y 2 sd")
+plt.fill_between(X_test.ravel(), mu_gp - 2*sd_gp, mu_gp + 2*sd_gp, alpha=0.3, color="C0", label="f 2 sd")
 plt.plot(X_train, f_train, "k--", alpha=0.3, label="true f")
 plt.legend()
 plt.title("Exact GP");
@@ -148,16 +155,25 @@ predict_vfe = pg.compile_predict(
     extra_vars=[Z_var],
     shared_extras=shared_extras_vfe,
 )
+predict_vfe_y = pg.compile_predict(
+    vfe, X_new_var, vfe_model, shared_params_vfe,
+    X_train=X_train, y_train=y_train,
+    extra_vars=[Z_var],
+    shared_extras=shared_extras_vfe, incl_lik=True,
+)
 
 mu_vfe, var_vfe = predict_vfe(X_test)
+_, var_vfe_y = predict_vfe_y(X_test)
 sd_vfe = np.sqrt(var_vfe)
+sd_vfe_y = np.sqrt(var_vfe_y)
 
 Z_final = shared_extras_vfe[0].get_value()
 
 plt.figure(figsize=(10, 4))
 plt.scatter(X_train, y_train, s=10, c="k", zorder=3, label="data")
-plt.plot(X_test, mu_vfe, label="VFE mean")
-plt.fill_between(X_test.ravel(), mu_vfe - 2*sd_vfe, mu_vfe + 2*sd_vfe, alpha=0.2, label="VFE 2 sd")
+plt.plot(X_test, mu_vfe, "C0", label="VFE mean")
+plt.fill_between(X_test.ravel(), mu_vfe - 2*sd_vfe_y, mu_vfe + 2*sd_vfe_y, alpha=0.1, color="C0", label="y 2 sd")
+plt.fill_between(X_test.ravel(), mu_vfe - 2*sd_vfe, mu_vfe + 2*sd_vfe, alpha=0.3, color="C0", label="f 2 sd")
 plt.scatter(Z_final, np.zeros(M) - 2, marker="^", c="r", s=40, label="inducing pts")
 plt.plot(X_train, f_train, "k--", alpha=0.3, label="true f")
 plt.legend(loc="upper right")
@@ -232,14 +248,22 @@ predict_svgp = pg.compile_predict(
     extra_vars=[q_mu_var, q_sqrt_var, Z_var],
     shared_extras=shared_extras_svgp,
 )
+predict_svgp_y = pg.compile_predict(
+    svgp, X_new_var, svgp_model, shared_params_svgp,
+    extra_vars=[q_mu_var, q_sqrt_var, Z_var],
+    shared_extras=shared_extras_svgp, incl_lik=True,
+)
 
 mu_svgp, var_svgp = predict_svgp(X_test)
+mu_svgp_y, var_svgp_y = predict_svgp_y(X_test)
 sd_svgp = np.sqrt(var_svgp)
+sd_svgp_y = np.sqrt(var_svgp_y)
 
 plt.figure(figsize=(10, 4))
 plt.scatter(X_train, y_train, s=10, c="k", zorder=3, label="data")
-plt.plot(X_test, mu_svgp, label="SVGP mean")
-plt.fill_between(X_test.ravel(), mu_svgp - 2*sd_svgp, mu_svgp + 2*sd_svgp, alpha=0.2, label="SVGP 2 sd")
+plt.plot(X_test, mu_svgp, "C0", label="SVGP mean")
+plt.fill_between(X_test.ravel(), mu_svgp_y - 2*sd_svgp_y, mu_svgp_y + 2*sd_svgp_y, alpha=0.1, color="C0", label="y 2 sd")
+plt.fill_between(X_test.ravel(), mu_svgp - 2*sd_svgp, mu_svgp + 2*sd_svgp, alpha=0.3, color="C0", label="f 2 sd")
 Z_opt = shared_extras_svgp[2].get_value()
 plt.scatter(Z_opt, np.zeros(M_svgp) - 2, marker="^", c="r", s=40, label="inducing pts (optimized)")
 plt.plot(X_train, f_train, "k--", alpha=0.3, label="true f")
@@ -252,14 +276,15 @@ plt.title(f"SVGP (M={M_svgp})");
 ```python
 fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True, sharey=True)
 
-for ax, (mu, sd, title) in zip(axes, [
-    (mu_gp, sd_gp, "Exact GP"),
-    (mu_vfe, sd_vfe, f"VFE (M={M})"),
-    (mu_svgp, sd_svgp, f"SVGP (M={M_svgp})"),
+for ax, (mu, sd_f, sd_y, title) in zip(axes, [
+    (mu_gp, sd_gp, sd_gp_y, "Exact GP"),
+    (mu_vfe, sd_vfe, sd_vfe_y, f"VFE (M={M})"),
+    (mu_svgp, sd_svgp, sd_svgp_y, f"SVGP (M={M_svgp})"),
 ]):
     ax.scatter(X_train, y_train, s=8, c="k", zorder=3)
     ax.plot(X_test, mu, "C0")
-    ax.fill_between(X_test.ravel(), mu - 2*sd, mu + 2*sd, alpha=0.2, color="C0")
+    ax.fill_between(X_test.ravel(), mu - 2*sd_y, mu + 2*sd_y, alpha=0.1, color="C0")
+    ax.fill_between(X_test.ravel(), mu - 2*sd_f, mu + 2*sd_f, alpha=0.3, color="C0")
     ax.plot(X_train, f_train, "k--", alpha=0.3)
     ax.set_title(title)
     ax.set_xlim(-1, 11)
