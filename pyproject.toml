@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ptgp"
 authors = [
-    {name = 'Bill Engles', email = 'example@me.com'}
+    {name = 'Bill Engels', email = 'w.j.engels@gmail.com'}
 ]
 description = "A practitioner's toolbox for estimating large-scale Gaussian Process models with PyMC and PyTensor"
 requires-python = ">=3.12"
