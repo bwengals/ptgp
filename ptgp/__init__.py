@@ -3,6 +3,7 @@ from ptgp.inducing_variables import InducingPoints, InducingVariables
 from ptgp.inference import fit_bfgs, fit_model, make_training_step, make_training_step_model
 from ptgp.kernels import (
     ExpQuad,
+    Gibbs,
     Kernel,
     Matern12,
     Matern32,
@@ -10,6 +11,7 @@ from ptgp.kernels import (
     ProductKernel,
     RandomWalk,
     SumKernel,
+    WarpedInput,
 )
 from ptgp.likelihoods import (
     Bernoulli,
@@ -43,7 +45,9 @@ __all__ = [
     "Matern52",
     "Matern32",
     "Matern12",
+    "Gibbs",
     "RandomWalk",
+    "WarpedInput",
     "SumKernel",
     "ProductKernel",
     # Likelihoods
