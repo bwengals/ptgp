@@ -41,7 +41,7 @@ with pm.Model() as model:
     eta   = pm.Exponential("eta", lam=1.0)
     sigma = pm.HalfNormal("sigma", sigma=1.0)
 
-    kernel = eta**2 * pg.Matern52(ls=ls)
+    kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
     gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
 
 # Compile training step — parameters stored as shared variables

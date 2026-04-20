@@ -19,7 +19,7 @@ class TestBaseConditional:
         M, N = 5, 10
         rng = np.random.default_rng(0)
         ls = 1.0
-        kernel = ExpQuad(ls=ls)
+        kernel = ExpQuad(input_dim=1, ls=ls)
 
         Z = rng.uniform(0, 5, (M, 1))
         X = rng.uniform(0, 5, (N, 1))
@@ -40,7 +40,7 @@ class TestBaseConditional:
         """Adding q_sqrt should increase variance compared to delta posterior."""
         M, N = 4, 8
         rng = np.random.default_rng(1)
-        kernel = ExpQuad(ls=1.0)
+        kernel = ExpQuad(input_dim=1, ls=1.0)
 
         Z = rng.uniform(0, 5, (M, 1))
         X = rng.uniform(0, 5, (N, 1))

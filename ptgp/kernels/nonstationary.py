@@ -12,6 +12,8 @@ class RandomWalk(Kernel):
     Scale with multiplication: eta**2 * RandomWalk()
     """
 
+    input_dim = 1
+
     def __call__(self, X, Y=None):
         symmetric = Y is None
         if symmetric:
