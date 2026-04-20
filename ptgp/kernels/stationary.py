@@ -1,4 +1,3 @@
-import numpy as np
 import pytensor.tensor as pt
 
 from ptgp.kernels.base import Kernel
@@ -45,16 +44,8 @@ class Stationary(Kernel):
     """
 
     def __init__(self, input_dim, ls, active_dims=None):
-        self.input_dim = input_dim
-        if active_dims is None:
-            self.active_dims = np.arange(input_dim)
-        else:
-            self.active_dims = np.asarray(active_dims, dtype=int)
-            if self.active_dims.max() >= input_dim:
-                raise ValueError(
-                    f"active_dims contains index {int(self.active_dims.max())}, "
-                    f"but input_dim is {input_dim}"
-                )
+        """Validate dimensions via the base class and store ``ls``."""
+        super().__init__(input_dim, active_dims)
         self.ls = ls
 
     def _slice_input(self, X):

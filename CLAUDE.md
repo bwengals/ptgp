@@ -34,9 +34,7 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 
 ## Notebooks
 
-- Jupyter notebooks are stored as Jupytext markdown (`.md`) files, not `.ipynb`. The `.gitignore` excludes `*.ipynb`.
-- To create or update a notebook, write or edit the `.md` file directly. Use Jupytext markdown format with the `jupyter:` YAML frontmatter.
-- To convert an existing `.ipynb` to `.md`: `jupytext --to md notebook.ipynb`
+- Jupyter notebooks are stored as `.ipynb` files and edited directly. No Jupytext pairing or markdown mirror.
 
 ## Environment
 
