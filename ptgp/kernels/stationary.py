@@ -1,3 +1,4 @@
+import numpy as np
 import pytensor.tensor as pt
 
 from ptgp.kernels.base import Kernel
@@ -30,16 +31,34 @@ def _euclidean_distance(X, Y):
 
 
 class Stationary(Kernel):
-    """Base class for stationary kernels k(x, y) = f(||x - y|| / ls)."""
+    """Base class for stationary kernels k(x, y) = f(||x - y|| / ls).
 
-    def __init__(self, ls, active_dims=None):
+    Parameters
+    ----------
+    input_dim : int
+        Number of columns of ``X`` the kernel expects.
+    ls : scalar or 1-D tensor
+        Lengthscale. Scalar → isotropic. Length-``len(active_dims)`` vector →
+        ARD (per-dimension lengthscales).
+    active_dims : sequence of int, optional
+        Columns of ``X`` this kernel operates on. Defaults to all columns.
+    """
+
+    def __init__(self, input_dim, ls, active_dims=None):
+        self.input_dim = input_dim
+        if active_dims is None:
+            self.active_dims = np.arange(input_dim)
+        else:
+            self.active_dims = np.asarray(active_dims, dtype=int)
+            if self.active_dims.max() >= input_dim:
+                raise ValueError(
+                    f"active_dims contains index {int(self.active_dims.max())}, "
+                    f"but input_dim is {input_dim}"
+                )
         self.ls = ls
-        self.active_dims = active_dims
 
     def _slice_input(self, X):
-        if self.active_dims is not None:
-            return X[:, self.active_dims]
-        return X
+        return X[:, self.active_dims]
 
     def _scaled_sq_dist(self, X, Y):
         X = self._slice_input(X) / self.ls
@@ -57,7 +76,7 @@ class ExpQuad(Stationary):
 
     k(x, y) = exp(-0.5 * ||x - y||^2 / ls^2)
 
-    Scale with multiplication: eta**2 * ExpQuad(ls=ls)
+    Scale with multiplication: eta**2 * ExpQuad(input_dim=..., ls=ls)
     """
 
     def __call__(self, X, Y=None):

@@ -36,15 +36,15 @@ def inducing_points():
 class TestMarginalLogLikelihood:
     def test_finite(self, regression_data):
         X, y = regression_data
-        gp = GP(kernel=ExpQuad(ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
+        gp = GP(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
         mll = _eval(marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(mll)
 
     def test_better_fit_higher_mll(self, regression_data):
         """A kernel with reasonable params should have higher MLL than a bad one."""
         X, y = regression_data
-        gp_good = GP(kernel=ExpQuad(ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
-        gp_bad = GP(kernel=ExpQuad(ls=0.01), mean=Zero(), likelihood=Gaussian(sigma=10.0))
+        gp_good = GP(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
+        gp_bad = GP(kernel=ExpQuad(input_dim=1, ls=0.01), mean=Zero(), likelihood=Gaussian(sigma=10.0))
 
         mll_good = _eval(
             marginal_log_likelihood(gp_good, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
@@ -60,7 +60,7 @@ class TestELBO:
     def test_finite(self, regression_data, inducing_points):
         X, y = regression_data
         svgp = SVGP(
-            kernel=ExpQuad(ls=1.0),
+            kernel=ExpQuad(input_dim=1, ls=1.0),
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
             inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
@@ -71,7 +71,7 @@ class TestELBO:
     def test_unwhitened_finite(self, regression_data, inducing_points):
         X, y = regression_data
         svgp = SVGP(
-            kernel=ExpQuad(ls=1.0),
+            kernel=ExpQuad(input_dim=1, ls=1.0),
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
             inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
@@ -85,7 +85,7 @@ class TestELBO:
         both parameterizations should give the same ELBO."""
         X, y = regression_data
         Z = pt.as_tensor_variable(inducing_points)
-        kernel = ExpQuad(ls=1.0)
+        kernel = ExpQuad(input_dim=1, ls=1.0)
 
         # Whitened: q_mu=0, q_sqrt=I is the prior q(v)=N(0,I)
         svgp_w = SVGP(
@@ -117,7 +117,7 @@ class TestELBO:
         """ELBO should be a lower bound on the marginal log likelihood."""
         X, y = regression_data
         ls, sigma = 1.0, 0.1
-        kernel = ExpQuad(ls=ls)
+        kernel = ExpQuad(input_dim=1, ls=ls)
 
         gp = GP(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
         mll_val = _eval(
@@ -139,7 +139,7 @@ class TestCollapsedELBO:
     def test_finite(self, regression_data, inducing_points):
         X, y = regression_data
         vfe_model = VFE(
-            kernel=ExpQuad(ls=1.0),
+            kernel=ExpQuad(input_dim=1, ls=1.0),
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
             inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
@@ -151,7 +151,7 @@ class TestCollapsedELBO:
         """Collapsed ELBO should be a lower bound on the marginal log likelihood."""
         X, y = regression_data
         ls, sigma = 1.0, 0.1
-        kernel = ExpQuad(ls=ls)
+        kernel = ExpQuad(input_dim=1, ls=ls)
 
         gp = GP(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
         mll_val = _eval(

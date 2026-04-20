@@ -44,7 +44,7 @@ X_train = np.sort(rng.uniform(0, 10, N))[:, None]
 X_test = np.linspace(-1, 11, 200)[:, None]
 
 # Draw from a GP prior with Matern-5/2 kernel
-K = eta_true**2 * pg.Matern52(ls_true)
+K = eta_true**2 * pg.Matern52(input_dim=1, ls=ls_true)
 K = K(X_train, X_train).eval() + 1e-6 * np.eye(N)
 
 f_train = rng.multivariate_normal(np.zeros(N), K)
@@ -67,7 +67,7 @@ with pm.Model() as gp_model:
     eta = pm.Exponential("eta", scale=2.0)
     sigma = pm.HalfNormal("sigma", sigma=1.0)
 
-    kernel = eta**2 * pg.Matern52(ls=ls)
+    kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
     gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
 
 train_step, shared_params, shared_extras = pg.compile_training_step(
@@ -125,7 +125,7 @@ with pm.Model() as vfe_model:
     sigma = pm.HalfNormal("sigma", sigma=1.0)
 
     vfe = pg.VFE(
-        kernel=eta**2 * pg.Matern52(ls=ls),
+        kernel=eta**2 * pg.Matern52(input_dim=1, ls=ls),
         likelihood=pg.Gaussian(sigma=sigma),
         inducing_variable=pg.InducingPoints(Z_var),
     )
@@ -199,7 +199,7 @@ with pm.Model() as svgp_model:
     nu = pm.Gamma("nu", alpha=2, beta=0.1)
 
     svgp = pg.SVGP(
-        kernel=eta**2 * pg.Matern52(ls=ls),
+        kernel=eta**2 * pg.Matern52(input_dim=1, ls=ls),
         likelihood=pg.StudentT(sigma=sigma, nu=nu),
         inducing_variable=pg.InducingPoints(Z_var),
         q_mu=q_mu_var,

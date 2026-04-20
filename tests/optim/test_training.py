@@ -33,7 +33,7 @@ def test_compile_training_step_gp(gp_data):
         eta = pm.Exponential("eta", lam=1.0)
         sigma = pm.Exponential("sigma", lam=1.0)
 
-        kernel = eta**2 * pg.Matern52(ls=ls)
+        kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
         gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
 
     X_var = pt.matrix("X")
@@ -65,7 +65,7 @@ def test_compile_predict_gp(gp_data):
         eta = pm.Exponential("eta", lam=1.0)
         sigma = pm.Exponential("sigma", lam=1.0)
 
-        kernel = eta**2 * pg.Matern52(ls=ls)
+        kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
         gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
 
     X_var = pt.matrix("X")
@@ -119,7 +119,7 @@ def test_compile_training_step_svgp(svgp_data):
         ls = pm.InverseGamma("ls", alpha=2.0, beta=1.0)
         eta = pm.Exponential("eta", lam=1.0)
 
-        kernel = eta**2 * pg.Matern52(ls=ls)
+        kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
         svgp = pg.SVGP(
             kernel=kernel,
             likelihood=pg.Gaussian(sigma=0.1),
@@ -159,7 +159,7 @@ def test_sgd_optimizer(gp_data):
         eta = pm.Exponential("eta", lam=1.0)
         sigma = pm.Exponential("sigma", lam=1.0)
 
-        kernel = eta**2 * pg.Matern52(ls=ls)
+        kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
         gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
 
     X_var = pt.matrix("X")

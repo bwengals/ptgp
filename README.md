@@ -29,7 +29,7 @@ log_eta = pt.scalar("log_eta")
 log_sigma = pt.scalar("log_sigma")
 
 # Build model
-kernel = pt.exp(log_eta)**2 * pg.Matern52(ls=pt.exp(log_ls))
+kernel = pt.exp(log_eta)**2 * pg.Matern52(input_dim=1, ls=pt.exp(log_ls))
 gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=pt.exp(log_sigma)))
 
 # Optimize hyperparameters
