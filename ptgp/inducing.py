@@ -151,8 +151,8 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
         raise ValueError(f"M={M} exceeds number of candidate points N={N}")
     rng = np.random.default_rng(rng)
 
-    X_sym = pt.matrix("X", dtype="float64")
-    Y_sym = pt.matrix("Y", dtype="float64")
+    X_sym = pt.matrix("_X", dtype="float64")
+    Y_sym = pt.matrix("_Y", dtype="float64")
     k_cross_fn = pytensor.function([X_sym, Y_sym], kernel(X_sym, Y_sym))
     k_diag_fn = pytensor.function([X_sym], pt.diag(kernel(X_sym)))
 
