@@ -44,7 +44,10 @@ class SVGP:
 
         M = inducing_variable.num_inducing
         self.q_mu = q_mu if q_mu is not None else pt.zeros(M)
-        self.q_sqrt = q_sqrt if q_sqrt is not None else pt.eye(M)
+        if q_sqrt is None:
+            self.q_sqrt = pt.specify_assumptions(pt.eye(M), diagonal=True)
+        else:
+            self.q_sqrt = pt.specify_assumptions(q_sqrt, lower_triangular=True)
 
     def predict(self, X, incl_lik=False):
         """Posterior predictive mean and variance.
