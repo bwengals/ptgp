@@ -28,36 +28,9 @@ All three are user facing. SVGP is the primary model for large datasets. VFE for
   - **JAX-based** (`ptgp/inference/`): L-BFGS-B or Optax SGD via JAX compilation
   - **Native PyTensor** (`ptgp/optim/`): Adam/SGD using `pytensor.shared` variables — prediction automatically uses trained parameters
 - Kernel and likelihood hyperparameters are PyMC RVs defined in `pm.Model` context
+- **Priors regularize training by default.** `compile_training_step` and `compile_scipy_objective` both add `model.logp(jacobian=True, sum=True)` to the loss, yielding MAP in the unconstrained (value-var) space. Set `include_prior=False` for MLE / pure ELBO without prior regularization.
 
-**User-facing pattern (native PyTensor):**
-```python
-import ptgp as pg
-
-X_var = pt.matrix("X")
-y_var = pt.vector("y")
-
-with pm.Model() as model:
-    ls    = pm.InverseGamma("ls", alpha=2.4, beta=1.5)
-    eta   = pm.Exponential("eta", lam=1.0)
-    sigma = pm.HalfNormal("sigma", sigma=1.0)
-
-    kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
-    gp = pg.gp.Unapproximated(kernel=kernel, likelihood=pg.likelihoods.Gaussian(sigma=sigma))
-
-# Compile training step — parameters stored as shared variables
-train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-    pg.objectives.marginal_log_likelihood, gp, X_var, y_var, model=model,
-)
-
-for i in range(500):
-    loss = train_step(X_train, y_train)
-
-# Compile prediction — reads same shared variables, no model reconstruction
-X_new_var = pt.matrix("X_new")
-predictn = pg.optim.compile_predict(gp, X_new_var, model, shared_params,
-                                X_train=X_train, y_train=y_train)
-mu, var = predictn(X_test)
-```
+The canonical, maintained usage examples live in [`notebooks/demo.ipynb`](notebooks/demo.ipynb), which covers `Unapproximated`, `VFE`, and `SVGP` end-to-end with training and prediction. Treat the notebook as the reference for how the pieces fit together.
 
 ## Kernel Design
 
@@ -125,10 +98,6 @@ Native PyTensor training without JAX. Uses `pytensor.shared` variables so that t
 
 For SVGP, variational parameters (`q_mu`, `q_sqrt`) are not PyMC RVs. Pass them as `extra_vars` with `extra_init` to `compile_training_step`. They get their own shared variables and are optimized alongside the PyMC parameters.
 
-### Known issue: recursion depth
-
-PyTensor's assumption-system branch recursively traverses the graph to infer matrix properties. SVGP + Adam creates a large enough graph that this exceeds Python's default recursion limit. Use `sys.setrecursionlimit(50000)` before compiling SVGP models. The rewrite failures are caught gracefully and don't affect correctness.
-
 ## Prediction
 
 - `predict()` returns symbolic PyTensor tensors
@@ -158,9 +127,13 @@ This is fundamentally different from GPyTorch/CoLA/linear_operator which choose 
 
 ## LinearOperator (`ptgp/linalg/`)
 
-Custom PyTensor Ops for lazy kernel evaluation and iterative solvers. Lives in PTGP initially, planned for upstream to PyTensor.
+**Status: stubs only.** The directory contains placeholder files sketching the intended module layout; nothing is implemented yet.
 
-Enables scaling via CG-based solves, lazy kernel matrix-vector products, and Lanczos-based log-determinant estimation. Deferred until after SVGP works with dense matrices.
+Planned as the home for inversion-free, GPyTorch-style linear algebra: a `LinearOperatorType` representing a matrix implicitly by its matvec, with Krylov-subspace consumers (CG for solves, Lanczos for log-determinants). Lives in PTGP initially with an eye toward upstreaming to PyTensor.
+
+Reference implementations to study when prototyping: GPyTorch's `linear_operator` (the original of this pattern, rich but heavy), GPJax's `cola` integration, and CoLA itself — CoLA and GPJax are likely the simpler codebases to draw from.
+
+Deferred until the dense-matrix SVGP path is solid and the upstream assumption-system rewrites land — algorithm selection for iterative vs direct methods depends on matrix size, which is symbolic at graph-build time and needs design work.
 
 ## Build Order
 
