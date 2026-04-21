@@ -44,7 +44,7 @@ def test_compile_training_step_gp(gp_data):
         gp,
         X_var,
         y_var,
-        pm_model=model,
+        model=model,
         learning_rate=1e-2,
     )
 
@@ -76,7 +76,7 @@ def test_compile_predict_gp(gp_data):
         gp,
         X_var,
         y_var,
-        pm_model=model,
+        model=model,
         learning_rate=1e-2,
     )
 
@@ -136,7 +136,7 @@ def test_compile_training_step_svgp(svgp_data):
         svgp,
         X_var,
         y_var,
-        pm_model=model,
+        model=model,
         extra_vars=[q_mu_var, q_sqrt_var],
         extra_init=[np.zeros(M), np.eye(M)],
         learning_rate=1e-2,
@@ -170,7 +170,7 @@ def test_sgd_optimizer(gp_data):
         gp,
         X_var,
         y_var,
-        pm_model=model,
+        model=model,
         optimizer_fn=pg.optim.sgd,
         learning_rate=1e-3,
     )

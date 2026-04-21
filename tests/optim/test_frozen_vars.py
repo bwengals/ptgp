@@ -43,7 +43,7 @@ class TestFrozenVars:
         y_var = pt.vector("y")
         train_step, _, _ = pg.optim.compile_training_step(
             pg.objectives.elbo, svgp, X_var, y_var,
-            pm_model=model,
+            model=model,
             extra_vars=[q_mu_var, q_sqrt_var],
             extra_init=[np.zeros(M), np.eye(M)],
             frozen_vars={Z_var: Z0},
@@ -70,7 +70,7 @@ class TestFrozenVars:
         # Phase 1: Z frozen.
         train_step_1, shared_1, extras_1 = pg.optim.compile_training_step(
             pg.objectives.elbo, svgp, X_var, y_var,
-            pm_model=model,
+            model=model,
             extra_vars=[q_mu_var, q_sqrt_var],
             extra_init=[np.zeros(M), np.eye(M)],
             frozen_vars={Z_var: Z0},
@@ -82,7 +82,7 @@ class TestFrozenVars:
         # Phase 2: same svgp, Z now trainable via extra_vars.
         train_step_2, shared_2, extras_2 = pg.optim.compile_training_step(
             pg.objectives.elbo, svgp, X_var, y_var,
-            pm_model=model,
+            model=model,
             extra_vars=[q_mu_var, q_sqrt_var, Z_var],
             extra_init=[np.zeros(M), np.eye(M), Z0],
             learning_rate=1e-2,
@@ -111,7 +111,7 @@ class TestFrozenVars:
         with pytest.raises(ValueError, match="both extra_vars and frozen_vars"):
             pg.optim.compile_training_step(
                 pg.objectives.elbo, svgp, X_var, y_var,
-                pm_model=model,
+                model=model,
                 extra_vars=[q_mu_var, q_sqrt_var, Z_var],
                 extra_init=[np.zeros(M), np.eye(M), Z0],
                 frozen_vars={Z_var: Z0},
