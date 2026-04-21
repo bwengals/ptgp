@@ -199,6 +199,144 @@ def compile_training_step(
     return train_step, shared_params, shared_extras
 
 
+def compile_scipy_objective(
+    objective_fn,
+    gp_model,
+    X_var,
+    y_var,
+    pm_model=None,
+    extra_vars=None,
+    extra_init=None,
+    frozen_vars=None,
+):
+    """Compile a (loss, grad) objective for ``scipy.optimize.minimize``.
+
+    Unlike :func:`compile_training_step`, scipy owns the parameter vector
+    during optimization: the compiled function takes a flat ``theta`` as
+    input, returns the scalar loss and flat gradient, and does not mutate
+    any state. Once scipy converges, call ``unpack_to_shared(result.x)``
+    to write the final values into the shared variables used by
+    :func:`compile_predict`.
+
+    Parameters
+    ----------
+    objective_fn : callable
+        ``(gp_model, X_var, y_var) -> scalar``, returning the quantity to
+        maximize (e.g. ``marginal_log_likelihood``, ``collapsed_elbo``).
+        The returned scalar is negated internally so scipy minimizes.
+    gp_model : GP, VFE, or SVGP
+        PTGP model whose hyperparameters are PyMC RVs.
+    X_var : TensorVariable
+        Symbolic input placeholder. ``X`` is passed to the compiled
+        function on each scipy iteration — typically the full training
+        inputs for GP/VFE (batching is not used with quasi-Newton methods).
+    y_var : TensorVariable
+        Symbolic target placeholder, handled like ``X_var``.
+    pm_model : pm.Model, optional
+        PyMC model context. Uses the current context if None. Every
+        continuous free RV becomes a slice of ``theta``; you do not need
+        to list them.
+    extra_vars : list of TensorVariable, optional
+        Additional symbolic variables to optimize that are not PyMC RVs
+        (so cannot be discovered from ``pm_model``). Typical entries: VFE
+        inducing-point ``Z_var``, or SVGP ``q_mu`` / ``q_sqrt``.
+    extra_init : list of ndarray, optional
+        Initial values for ``extra_vars``, in the same order. Required
+        whenever ``extra_vars`` is provided. Shapes determine the
+        corresponding segments of ``theta``.
+    frozen_vars : dict[TensorVariable, ndarray], optional
+        Symbolic variables to pin to constant values. Each key is
+        replaced in the graph by ``pt.as_tensor_variable(value)`` before
+        compilation, receives no gradient, and is excluded from
+        ``theta``. Keys must not also appear in ``extra_vars``.
+
+    Returns
+    -------
+    fun : callable
+        ``(theta, X, y) -> (loss, flat_grad)``. ``theta`` is a 1D
+        ``ndarray``; ``loss`` is a scalar; ``flat_grad`` is a 1D
+        ``ndarray`` with the same layout as ``theta``. Pass directly to
+        ``scipy.optimize.minimize(fun, theta0, args=(X, y), jac=True,
+        method=...)``.
+    theta0 : ndarray
+        Flat initial parameter vector. Layout: PyMC value vars in
+        ``pm_model.continuous_value_vars`` order, followed by
+        ``extra_vars`` in the order given. Values come from
+        ``pm_model.initial_point()`` and ``extra_init``. Use as the
+        ``x0`` argument to ``scipy.optimize.minimize``.
+    unpack_to_shared : callable
+        ``(theta) -> None``. Slices ``theta`` along the same layout as
+        ``theta0`` and writes each piece into the corresponding entry of
+        ``shared_params`` / ``shared_extras``. Call once after scipy
+        converges so that :func:`compile_predict` sees the trained
+        values. Mutates the captured shared vars in place; returns
+        nothing.
+    shared_params : dict
+        ``{value_var: shared_var}`` for every continuous PyMC value var.
+        Needed by :func:`compile_predict` and :func:`get_trained_params`.
+        Not read by ``fun`` — present only for the predict handoff.
+    shared_extras : list
+        Shared variables for ``extra_vars``, in the same order. Needed
+        by :func:`compile_predict`. Not read by ``fun``.
+    """
+    pm_model = pm.modelcontext(pm_model)
+
+    shared_params, shared_extras, _ = _make_shared_params(
+        pm_model, extra_vars, extra_init,
+    )
+
+    value_vars_ordered = list(pm_model.continuous_value_vars)
+    layout = []
+    theta0_pieces = []
+    for vv in value_vars_ordered:
+        sv = shared_params[vv]
+        val = sv.get_value()
+        layout.append((sv, val.shape, val.size))
+        theta0_pieces.append(val.ravel())
+    if extra_vars is not None:
+        for sv in shared_extras:
+            val = sv.get_value()
+            layout.append((sv, val.shape, val.size))
+            theta0_pieces.append(val.ravel())
+    theta0 = np.concatenate(theta0_pieces) if theta0_pieces else np.zeros(0)
+
+    theta_var = pt.vector("_theta", dtype="float64")
+    pieces = []
+    offset = 0
+    for _, shape, size in layout:
+        pieces.append(theta_var[offset:offset + size].reshape(shape))
+        offset += size
+
+    loss = -objective_fn(gp_model, X_var, y_var)
+    [loss_rvs_replaced] = pm_model.replace_rvs_by_values([loss])
+
+    replace_map = {}
+    piece_iter = iter(pieces)
+    for vv in value_vars_ordered:
+        replace_map[vv] = next(piece_iter)
+    if extra_vars is not None:
+        for var in extra_vars:
+            replace_map[var] = next(piece_iter)
+    if frozen_vars is not None:
+        for var, value in frozen_vars.items():
+            replace_map[var] = pt.as_tensor_variable(np.asarray(value, dtype=np.float64))
+
+    loss_replaced = graph_replace(loss_rvs_replaced, replace_map, strict=False)
+    flat_grad = pt.grad(loss_replaced, theta_var)
+
+    fun = pytensor.function([theta_var, X_var, y_var], [loss_replaced, flat_grad])
+
+    def unpack_to_shared(theta):
+        """Write ``theta`` into the captured shared vars for prediction."""
+        theta = np.asarray(theta, dtype=np.float64)
+        offset = 0
+        for sv, shape, size in layout:
+            sv.set_value(theta[offset:offset + size].reshape(shape))
+            offset += size
+
+    return fun, theta0, unpack_to_shared, shared_params, shared_extras
+
+
 def get_trained_params(pm_model, shared_params):
     """Get trained hyperparameter values in the original (constrained) space.
 
