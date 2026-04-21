@@ -84,6 +84,7 @@ def compile_training_step(
     extra_init=None,
     frozen_vars=None,
     param_groups=None,
+    include_prior=True,
     **optimizer_kwargs,
 ):
     """Compile a training step function for a PTGP model with PyMC priors.
@@ -107,6 +108,11 @@ def compile_training_step(
     optimizer_fn : callable, optional
         Optimizer function (default: ``adam``). Must have signature
         ``(loss, params, **kwargs) -> updates_dict``.
+    include_prior : bool
+        If True (default), add the PyMC joint log-prior (with the
+        transform log-det-jacobian) to the objective, yielding MAP in
+        the unconstrained space. Set False for MLE / pure ELBO without
+        prior regularization.
     extra_vars : list of TensorVariable, optional
         Additional symbolic variables to optimize that are not PyMC RVs and
         so cannot be discovered from ``model``. Typical entries: SVGP
@@ -181,6 +187,8 @@ def compile_training_step(
         optimizer_kwargs = {**optimizer_kwargs, "param_groups": resolved_groups}
 
     loss = -objective_fn(gp_model, X_var, y_var)
+    if include_prior:
+        loss = loss - model.logp(jacobian=True, sum=True)
     [loss_replaced] = _replace_graph(
         [loss],
         model,
@@ -209,6 +217,7 @@ def compile_scipy_objective(
     extra_vars=None,
     extra_init=None,
     frozen_vars=None,
+    include_prior=True,
 ):
     """Compile a (loss, grad) objective for ``scipy.optimize.minimize``.
 
@@ -250,6 +259,11 @@ def compile_scipy_objective(
         replaced in the graph by ``pt.as_tensor_variable(value)`` before
         compilation, receives no gradient, and is excluded from
         ``theta``. Keys must not also appear in ``extra_vars``.
+    include_prior : bool
+        If True (default), add the PyMC joint log-prior (with the
+        transform log-det-jacobian) to the objective, yielding MAP in
+        the unconstrained space. Set False for MLE / pure ELBO without
+        prior regularization.
 
     Returns
     -------
@@ -309,6 +323,8 @@ def compile_scipy_objective(
         offset += size
 
     loss = -objective_fn(gp_model, X_var, y_var)
+    if include_prior:
+        loss = loss - model.logp(jacobian=True, sum=True)
     [loss_rvs_replaced] = model.replace_rvs_by_values([loss])
 
     replace_map = {}
@@ -358,7 +374,10 @@ def get_trained_params(model, shared_params):
         vv = model.rvs_to_values[rv]
         transform = model.rvs_to_transforms[rv]
         unconstrained = shared_params[vv].get_value()
-        constrained = transform.backward(unconstrained).eval()
+        if transform is None:
+            constrained = np.asarray(unconstrained)
+        else:
+            constrained = transform.backward(unconstrained).eval()
         result[rv.name] = float(constrained) if constrained.ndim == 0 else constrained
     return result
 
