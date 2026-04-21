@@ -71,6 +71,7 @@ def compile_training_step(
     optimizer_fn=None,
     extra_vars=None,
     extra_init=None,
+    param_groups=None,
     **optimizer_kwargs,
 ):
     """Compile a training step function for a PTGP model with PyMC priors.
@@ -95,8 +96,14 @@ def compile_training_step(
         Non-PyMC symbolic variables to optimize (e.g. ``q_mu``, ``q_sqrt``).
     extra_init : list of ndarray, optional
         Initial values for ``extra_vars``.
+    param_groups : dict[str, list[TensorVariable]], optional
+        Maps a group name to a list of symbolic variables (PyMC value vars
+        or entries of ``extra_vars``). Resolved to shared variables and
+        forwarded to the optimizer. Required when ``learning_rate`` is a
+        dict. The union of groups must cover every optimized parameter.
     **optimizer_kwargs
-        Passed to the optimizer (e.g. ``learning_rate=1e-2``).
+        Passed to the optimizer (e.g. ``learning_rate=1e-2`` or a dict
+        of per-group rates).
 
     Returns
     -------
@@ -118,6 +125,24 @@ def compile_training_step(
         extra_vars,
         extra_init,
     )
+
+    if param_groups is not None:
+        sym_to_shared = dict(shared_params)
+        if extra_vars is not None:
+            for var, sv in zip(extra_vars, shared_extras):
+                sym_to_shared[var] = sv
+        resolved_groups = {}
+        for name, group in param_groups.items():
+            resolved = []
+            for var in group:
+                if var not in sym_to_shared:
+                    raise ValueError(
+                        f"param_groups[{name!r}] contains unknown variable "
+                        f"{var.name or repr(var)}"
+                    )
+                resolved.append(sym_to_shared[var])
+            resolved_groups[name] = resolved
+        optimizer_kwargs = {**optimizer_kwargs, "param_groups": resolved_groups}
 
     loss = -objective_fn(gp_model, X_var, y_var)
     [loss_replaced] = _replace_graph(
