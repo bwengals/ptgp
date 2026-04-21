@@ -26,6 +26,7 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 - **Lengthscale**: Use `ls` for lengthscale parameters.
 - **Multiple parameters**: When there are multiple scale or lengthscale parameters (e.g. additive kernels), number them: `eta1`, `eta2`, `ls1`, `ls2`.
 - **Name symbolic variables in complex examples**: Pass `name="..."` when constructing PyTensor variables (`pt.matrix("X")`, `pt.dmatrix("Z_var")`, etc.) in examples that involve per-group learning rates, per-group schedules, or multi-phase training loops. In those settings, symbolic vars become dict keys (e.g. in `param_groups`) and show up in error messages — error text falls back to `var.name or repr(var)`, and unnamed vars render as opaque addresses. Simple single-phase examples don't need this.
+- **Error messages**: Keep them concise and include either a brief suggestion of the fix or the reason/contradiction that caused the error. One or two short sentences. The first sentence names the problem; the second names the reason or the fix. Example: `"Variables appear in both extra_vars and frozen_vars: [...]. They cannot be both trainable and frozen."`
 
 ## Testing
 
