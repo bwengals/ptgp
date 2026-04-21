@@ -3,7 +3,7 @@ import pytensor.tensor as pt
 from ptgp.mean import Zero
 
 
-class GP:
+class Unapproximated:
     """Exact (unapproximated) Gaussian process.
 
     Parameters
