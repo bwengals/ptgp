@@ -43,19 +43,30 @@ def _make_shared_params(pm_model, extra_vars=None, extra_init=None):
     return shared_params, shared_extras, all_shared
 
 
-def _replace_graph(outputs, pm_model, shared_params, extra_vars=None, shared_extras=None):
+def _replace_graph(
+    outputs,
+    pm_model,
+    shared_params,
+    extra_vars=None,
+    shared_extras=None,
+    frozen_vars=None,
+):
     """Replace PyMC RVs with value vars, then value vars with shared vars.
 
-    Also replaces any extra symbolic vars with their shared counterparts.
-    Only includes replacements for variables that actually appear in the graph,
-    since not all parameters may be used (e.g. likelihood sigma is absent from
-    SVGP's predict graph).
+    Also replaces any extra symbolic vars with their shared counterparts,
+    and any ``frozen_vars`` with their (non-trainable) constant tensors.
+    Only includes replacements for variables that actually appear in the
+    graph, since not all parameters may be used (e.g. likelihood sigma is
+    absent from SVGP's predict graph).
     """
     replaced = pm_model.replace_rvs_by_values(outputs)
     replace_map = dict(shared_params)
     if extra_vars is not None and shared_extras is not None:
         for var, sv in zip(extra_vars, shared_extras):
             replace_map[var] = sv
+    if frozen_vars is not None:
+        for var, value in frozen_vars.items():
+            replace_map[var] = pt.as_tensor_variable(np.asarray(value, dtype=np.float64))
 
     # strict=False because not all parameters may appear in every graph
     # (e.g. likelihood sigma is absent from SVGP's predict graph)
@@ -71,6 +82,7 @@ def compile_training_step(
     optimizer_fn=None,
     extra_vars=None,
     extra_init=None,
+    frozen_vars=None,
     param_groups=None,
     **optimizer_kwargs,
 ):
@@ -88,14 +100,28 @@ def compile_training_step(
     y_var : TensorVariable
         Symbolic target placeholder.
     pm_model : pm.Model, optional
-        PyMC model context. Uses current context if None.
+        PyMC model context. Uses current context if None. Every continuous
+        free RV in the model is automatically made into a trainable shared
+        variable — you do not need to list them.
     optimizer_fn : callable, optional
         Optimizer function (default: ``adam``). Must have signature
         ``(loss, params, **kwargs) -> updates_dict``.
     extra_vars : list of TensorVariable, optional
-        Non-PyMC symbolic variables to optimize (e.g. ``q_mu``, ``q_sqrt``).
+        Additional symbolic variables to optimize that are not PyMC RVs and
+        so cannot be discovered from ``pm_model``. Typical entries: SVGP
+        ``q_mu`` / ``q_sqrt``, or a trainable inducing-point ``Z_var``.
     extra_init : list of ndarray, optional
-        Initial values for ``extra_vars``.
+        Initial values for ``extra_vars``, in the same order. Required
+        whenever ``extra_vars`` is provided.
+    frozen_vars : dict[TensorVariable, ndarray], optional
+        Symbolic variables to pin to constant values for this compile call.
+        Each key is replaced in the graph by ``pt.as_tensor_variable(value)``
+        before compilation, so it receives no gradient and is not updated.
+        Use for staged training where a single model is built once with
+        symbolic placeholders: in an early phase, pass the placeholder in
+        ``frozen_vars`` (and omit it from ``extra_vars``) to freeze it; in
+        a later phase, move it to ``extra_vars`` to make it trainable.
+        Keys must not also appear in ``extra_vars``.
     param_groups : dict[str, list[TensorVariable]], optional
         Maps a group name to a list of symbolic variables (PyMC value vars
         or entries of ``extra_vars``). Resolved to shared variables and
@@ -119,6 +145,15 @@ def compile_training_step(
     pm_model = pm.modelcontext(pm_model)
     if optimizer_fn is None:
         optimizer_fn = adam
+
+    if frozen_vars and extra_vars:
+        overlap = [v for v in extra_vars if v in frozen_vars]
+        if overlap:
+            names = [v.name or repr(v) for v in overlap]
+            raise ValueError(
+                f"Variables appear in both extra_vars and frozen_vars: {names}. "
+                f"They cannot be both trainable and frozen."
+            )
 
     shared_params, shared_extras, all_shared = _make_shared_params(
         pm_model,
@@ -151,6 +186,7 @@ def compile_training_step(
         shared_params,
         extra_vars,
         shared_extras,
+        frozen_vars=frozen_vars,
     )
 
     updates = optimizer_fn(loss_replaced, all_shared, **optimizer_kwargs)
