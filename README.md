@@ -8,9 +8,9 @@ PTGP writes GP math directly and simply — `pt.linalg.inv(K)`, `pt.linalg.slogd
 
 | Model | Description |
 |-------|-------------|
-| `GP` | Exact full Gaussian process |
-| `VFE` | Variational Free Energy sparse GP (Titsias' collapsed bound) |
-| `SVGP` | Stochastic Variational GP — the workhorse for large datasets |
+| `gp.Unapproximated` | Exact full Gaussian process |
+| `gp.VFE` | Variational Free Energy sparse GP (Titsias' collapsed bound) |
+| `gp.SVGP` | Stochastic Variational GP — the workhorse for large datasets |
 
 ## Quick start
 
@@ -29,12 +29,12 @@ log_eta = pt.scalar("log_eta")
 log_sigma = pt.scalar("log_sigma")
 
 # Build model
-kernel = pt.exp(log_eta)**2 * pg.Matern52(input_dim=1, ls=pt.exp(log_ls))
-gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=pt.exp(log_sigma)))
+kernel = pt.exp(log_eta)**2 * pg.kernels.Matern52(input_dim=1, ls=pt.exp(log_ls))
+gp = pg.gp.Unapproximated(kernel=kernel, likelihood=pg.likelihoods.Gaussian(sigma=pt.exp(log_sigma)))
 
 # Optimize hyperparameters
-opt_values, result = pg.fit_bfgs(
-    pg.marginal_log_likelihood, gp, X, y,
+opt_values, result = pg.inference.fit_bfgs(
+    pg.objectives.marginal_log_likelihood, gp, X, y,
     params=[log_ls, log_eta, log_sigma],
     init_values=[0.0, 0.0, -1.0],
 )

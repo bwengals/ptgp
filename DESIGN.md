@@ -14,11 +14,11 @@ A practical GP library for advanced users who need modeling flexibility, built o
 
 | Model | Purpose |
 |-------|---------|
-| `GP` | Exact full GP |
+| `Unapproximated` | Exact full GP |
 | `VFE` | Variational Free Energy sparse GP |
 | `SVGP` | Stochastic Variational GP — the workhorse |
 
-All three are user facing. SVGP is the primary model for large datasets. VFE for cases that don't need minibatching. GP for small datasets.
+All three are user facing. SVGP is the primary model for large datasets. VFE for cases that don't need minibatching. `Unapproximated` for small datasets.
 
 ## Prior / Inference Design
 
@@ -41,12 +41,12 @@ with pm.Model() as model:
     eta   = pm.Exponential("eta", lam=1.0)
     sigma = pm.HalfNormal("sigma", sigma=1.0)
 
-    kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
-    gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
+    kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
+    gp = pg.gp.Unapproximated(kernel=kernel, likelihood=pg.likelihoods.Gaussian(sigma=sigma))
 
 # Compile training step — parameters stored as shared variables
-train_step, shared_params, shared_extras = pg.compile_training_step(
-    pg.marginal_log_likelihood, gp, X_var, y_var, pm_model=model,
+train_step, shared_params, shared_extras = pg.optim.compile_training_step(
+    pg.objectives.marginal_log_likelihood, gp, X_var, y_var, pm_model=model,
 )
 
 for i in range(500):
@@ -54,7 +54,7 @@ for i in range(500):
 
 # Compile prediction — reads same shared variables, no model reconstruction
 X_new_var = pt.matrix("X_new")
-predictn = pg.compile_predict(gp, X_new_var, model, shared_params,
+predictn = pg.optim.compile_predict(gp, X_new_var, model, shared_params,
                                 X_train=X_train, y_train=y_train)
 mu, var = predictn(X_test)
 ```
@@ -83,9 +83,9 @@ Each objective is 1:1 with a model class and cannot be used interchangeably. The
 
 ```python
 def elbo_scaled(model, X, y):
-    return pg.elbo(model, X, y, n_data=N)
+    return pg.objectives.elbo(model, X, y, n_data=N)
 
-pg.compile_training_step(elbo_scaled, svgp, X_var, y_var, ...)
+pg.optim.compile_training_step(elbo_scaled, svgp, X_var, y_var, ...)
 ```
 
 If objectives were methods, passing them to `compile_training_step` would require lambdas or wrappers.

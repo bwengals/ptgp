@@ -33,14 +33,14 @@ def test_compile_training_step_gp(gp_data):
         eta = pm.Exponential("eta", lam=1.0)
         sigma = pm.Exponential("sigma", lam=1.0)
 
-        kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
-        gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
+        kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
+        gp = pg.gp.Unapproximated(kernel=kernel, likelihood=pg.likelihoods.Gaussian(sigma=sigma))
 
     X_var = pt.matrix("X")
     y_var = pt.vector("y")
 
-    train_step, shared_params, shared_extras = pg.compile_training_step(
-        pg.marginal_log_likelihood,
+    train_step, shared_params, shared_extras = pg.optim.compile_training_step(
+        pg.objectives.marginal_log_likelihood,
         gp,
         X_var,
         y_var,
@@ -65,14 +65,14 @@ def test_compile_predict_gp(gp_data):
         eta = pm.Exponential("eta", lam=1.0)
         sigma = pm.Exponential("sigma", lam=1.0)
 
-        kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
-        gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
+        kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
+        gp = pg.gp.Unapproximated(kernel=kernel, likelihood=pg.likelihoods.Gaussian(sigma=sigma))
 
     X_var = pt.matrix("X")
     y_var = pt.vector("y")
 
-    train_step, shared_params, shared_extras = pg.compile_training_step(
-        pg.marginal_log_likelihood,
+    train_step, shared_params, shared_extras = pg.optim.compile_training_step(
+        pg.objectives.marginal_log_likelihood,
         gp,
         X_var,
         y_var,
@@ -84,7 +84,7 @@ def test_compile_predict_gp(gp_data):
         train_step(X, y)
 
     X_new_var = pt.matrix("X_new")
-    predict_fn = pg.compile_predict(
+    predict_fn = pg.optim.compile_predict(
         gp,
         X_new_var,
         model,
@@ -119,11 +119,11 @@ def test_compile_training_step_svgp(svgp_data):
         ls = pm.InverseGamma("ls", alpha=2.0, beta=1.0)
         eta = pm.Exponential("eta", lam=1.0)
 
-        kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
-        svgp = pg.SVGP(
+        kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
+        svgp = pg.gp.SVGP(
             kernel=kernel,
-            likelihood=pg.Gaussian(sigma=0.1),
-            inducing_variable=pg.InducingPoints(pt.as_tensor_variable(Z_init)),
+            likelihood=pg.likelihoods.Gaussian(sigma=0.1),
+            inducing_variable=pg.inducing_variables.InducingPoints(pt.as_tensor_variable(Z_init)),
             q_mu=q_mu_var,
             q_sqrt=q_sqrt_var,
         )
@@ -131,8 +131,8 @@ def test_compile_training_step_svgp(svgp_data):
     X_var = pt.matrix("X")
     y_var = pt.vector("y")
 
-    train_step, shared_params, shared_extras = pg.compile_training_step(
-        pg.elbo,
+    train_step, shared_params, shared_extras = pg.optim.compile_training_step(
+        pg.objectives.elbo,
         svgp,
         X_var,
         y_var,
@@ -159,19 +159,19 @@ def test_sgd_optimizer(gp_data):
         eta = pm.Exponential("eta", lam=1.0)
         sigma = pm.Exponential("sigma", lam=1.0)
 
-        kernel = eta**2 * pg.Matern52(input_dim=1, ls=ls)
-        gp = pg.GP(kernel=kernel, likelihood=pg.Gaussian(sigma=sigma))
+        kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
+        gp = pg.gp.Unapproximated(kernel=kernel, likelihood=pg.likelihoods.Gaussian(sigma=sigma))
 
     X_var = pt.matrix("X")
     y_var = pt.vector("y")
 
-    train_step, shared_params, shared_extras = pg.compile_training_step(
-        pg.marginal_log_likelihood,
+    train_step, shared_params, shared_extras = pg.optim.compile_training_step(
+        pg.objectives.marginal_log_likelihood,
         gp,
         X_var,
         y_var,
         pm_model=model,
-        optimizer_fn=pg.sgd,
+        optimizer_fn=pg.optim.sgd,
         learning_rate=1e-3,
     )
 

@@ -5,14 +5,12 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 
-from ptgp.gp import GP
+from ptgp.gp import SVGP, VFE, Unapproximated
 from ptgp.inducing_variables import InducingPoints
 from ptgp.kernels import ExpQuad
 from ptgp.likelihoods import Gaussian
 from ptgp.mean import Zero
 from ptgp.objectives import collapsed_elbo, elbo, marginal_log_likelihood
-from ptgp.svgp import SVGP
-from ptgp.vfe import VFE
 
 
 def _eval(*tensors):
@@ -36,15 +34,15 @@ def inducing_points():
 class TestMarginalLogLikelihood:
     def test_finite(self, regression_data):
         X, y = regression_data
-        gp = GP(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
+        gp = Unapproximated(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
         mll = _eval(marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(mll)
 
     def test_better_fit_higher_mll(self, regression_data):
         """A kernel with reasonable params should have higher MLL than a bad one."""
         X, y = regression_data
-        gp_good = GP(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
-        gp_bad = GP(kernel=ExpQuad(input_dim=1, ls=0.01), mean=Zero(), likelihood=Gaussian(sigma=10.0))
+        gp_good = Unapproximated(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
+        gp_bad = Unapproximated(kernel=ExpQuad(input_dim=1, ls=0.01), mean=Zero(), likelihood=Gaussian(sigma=10.0))
 
         mll_good = _eval(
             marginal_log_likelihood(gp_good, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
@@ -119,7 +117,7 @@ class TestELBO:
         ls, sigma = 1.0, 0.1
         kernel = ExpQuad(input_dim=1, ls=ls)
 
-        gp = GP(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
+        gp = Unapproximated(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
         mll_val = _eval(
             marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
         )
@@ -153,7 +151,7 @@ class TestCollapsedELBO:
         ls, sigma = 1.0, 0.1
         kernel = ExpQuad(input_dim=1, ls=ls)
 
-        gp = GP(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
+        gp = Unapproximated(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
         mll_val = _eval(
             marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
         )
