@@ -1,7 +1,7 @@
-"""Inducing point initialization strategies.
+"""Inducing variables and initialization strategies.
 
-Each function returns an :class:`~ptgp.inducing_variables.InducingPoints`
-wrapping a plain numpy array, so ``ip.Z`` is directly usable for plotting.
+The `*_init` functions return an :class:`Points` wrapping a plain
+numpy array, so ``ip.Z`` is directly usable for plotting.
 """
 
 import numpy as np
@@ -9,11 +9,39 @@ import pytensor
 import pytensor.tensor as pt
 import scipy.cluster.vq
 
-from ptgp.inducing_variables import InducingPoints
 from ptgp.kernels.base import Kernel
 
 
-def random_subsample(X, M, rng=None):
+class InducingVariables:
+    """Base class for inducing variables.
+
+    Enables dispatch to different implementations for inter-domain,
+    multiscale, or structured inducing points.
+    """
+
+    @property
+    def num_inducing(self):
+        raise NotImplementedError
+
+
+class Points(InducingVariables):
+    """Standard real-space inducing points.
+
+    Parameters
+    ----------
+    Z : tensor or PyMC random variable, shape (M, D)
+        Inducing point locations.
+    """
+
+    def __init__(self, Z):
+        self.Z = Z
+
+    @property
+    def num_inducing(self):
+        return self.Z.shape[0]
+
+
+def random_subsample_init(X, M, rng=None):
     """Select ``M`` inducing points uniformly at random from ``X``.
 
     Parameters
@@ -27,7 +55,7 @@ def random_subsample(X, M, rng=None):
 
     Returns
     -------
-    InducingPoints
+    Points
         Wrapping an ``(M, D)`` numpy array.
     """
     X = np.asarray(X)
@@ -36,10 +64,10 @@ def random_subsample(X, M, rng=None):
         raise ValueError(f"M={M} exceeds number of candidate points N={N}")
     rng = np.random.default_rng(rng)
     idx = rng.choice(N, size=M, replace=False)
-    return InducingPoints(X[idx])
+    return Points(X[idx])
 
 
-def kmeans(X, M, rng=None):
+def kmeans_init(X, M, rng=None):
     """k-means++ centroids of ``X`` as inducing points.
 
     Uses :func:`scipy.cluster.vq.kmeans2` with ``minit="++"``.
@@ -53,7 +81,7 @@ def kmeans(X, M, rng=None):
 
     Returns
     -------
-    InducingPoints
+    Points
         Wrapping an ``(M, D)`` numpy array of centroids.
     """
     X = np.asarray(X, dtype=np.float64)
@@ -62,10 +90,10 @@ def kmeans(X, M, rng=None):
         raise ValueError(f"M={M} exceeds number of candidate points N={N}")
     seed = int(np.random.default_rng(rng).integers(0, 2**31 - 1))
     centroids, _ = scipy.cluster.vq.kmeans2(X, M, minit="++", seed=seed)
-    return InducingPoints(centroids)
+    return Points(centroids)
 
 
-def greedy_variance(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
+def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
     """Greedy conditional-variance (pivoted-Cholesky) selection.
 
     Implements the "ConditionalVariance" initialization of Burt et al. (2020),
@@ -85,8 +113,8 @@ def greedy_variance(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
     problems the frozen subset is within noise of jointly-optimized ``Z`` at a
     tiny fraction of the compute. The standard recipe:
 
-    1. Initialize ``Z`` with ``greedy_variance(X, M, kernel)`` using initial
-       kernel hyperparameters.
+    1. Initialize ``Z`` with ``greedy_variance_init(X, M, kernel)`` using
+       initial kernel hyperparameters.
     2. Freeze ``Z``. Train the kernel/likelihood hyperparameters (and, for
        SVGP, the variational parameters).
     3. *Optional.* Re-initialize ``Z`` with the learned hyperparameters and
@@ -112,7 +140,7 @@ def greedy_variance(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
 
     Returns
     -------
-    InducingPoints
+    Points
         Wrapping an ``(M', D)`` numpy array with ``M' <= M``.
     """
     if not isinstance(kernel, Kernel):
@@ -136,7 +164,7 @@ def greedy_variance(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
     indices[0] = int(np.argmax(d))
 
     if M == 1:
-        return InducingPoints(Xp[indices])
+        return Points(Xp[indices])
 
     C = np.zeros((M - 1, N))
     final_m = M
@@ -160,4 +188,4 @@ def greedy_variance(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
             final_m = m + 2
             break
 
-    return InducingPoints(Xp[indices[:final_m]])
+    return Points(Xp[indices[:final_m]])

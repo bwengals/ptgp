@@ -20,7 +20,7 @@ def _make_svgp(Z_placeholder, M):
         svgp = pg.gp.SVGP(
             kernel=kernel,
             likelihood=pg.likelihoods.Gaussian(sigma=0.1),
-            inducing_variable=pg.inducing_variables.InducingPoints(Z_placeholder),
+            inducing_variable=pg.inducing.Points(Z_placeholder),
             q_mu=q_mu_var,
             q_sqrt=q_sqrt_var,
         )

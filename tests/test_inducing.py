@@ -5,8 +5,12 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 
-from ptgp.inducing_init import greedy_variance, kmeans, random_subsample
-from ptgp.inducing_variables import InducingPoints
+from ptgp.inducing import (
+    Points,
+    greedy_variance_init,
+    kmeans_init,
+    random_subsample_init,
+)
 from ptgp.kernels import ExpQuad
 
 
@@ -36,68 +40,68 @@ def gaussian_blobs():
 class TestRandomSubsample:
     def test_returns_inducing_points(self):
         X = np.random.default_rng(0).standard_normal((50, 2))
-        ip = random_subsample(X, 10, rng=0)
-        assert isinstance(ip, InducingPoints)
+        ip = random_subsample_init(X, 10, rng=0)
+        assert isinstance(ip, Points)
         assert isinstance(ip.Z, np.ndarray)
         assert ip.Z.shape == (10, 2)
 
     def test_rows_are_in_x(self):
         X = np.random.default_rng(0).standard_normal((50, 2))
-        ip = random_subsample(X, 10, rng=0)
+        ip = random_subsample_init(X, 10, rng=0)
         for z in ip.Z:
             assert np.any(np.all(X == z, axis=1))
 
     def test_no_duplicates(self):
         X = np.random.default_rng(0).standard_normal((50, 2))
-        ip = random_subsample(X, 30, rng=0)
+        ip = random_subsample_init(X, 30, rng=0)
         assert len(np.unique(ip.Z, axis=0)) == 30
 
     def test_reproducible(self):
         X = np.random.default_rng(0).standard_normal((50, 2))
-        ip1 = random_subsample(X, 10, rng=42)
-        ip2 = random_subsample(X, 10, rng=42)
+        ip1 = random_subsample_init(X, 10, rng=42)
+        ip2 = random_subsample_init(X, 10, rng=42)
         np.testing.assert_array_equal(ip1.Z, ip2.Z)
 
     def test_rejects_m_too_large(self):
         X = np.random.default_rng(0).standard_normal((10, 2))
         with pytest.raises(ValueError, match="exceeds"):
-            random_subsample(X, 20)
+            random_subsample_init(X, 20)
 
 
 class TestKmeans:
     def test_returns_inducing_points(self, gaussian_blobs):
         X, _ = gaussian_blobs
-        ip = kmeans(X, 3, rng=0)
-        assert isinstance(ip, InducingPoints)
+        ip = kmeans_init(X, 3, rng=0)
+        assert isinstance(ip, Points)
         assert isinstance(ip.Z, np.ndarray)
         assert ip.Z.shape == (3, 2)
 
     def test_recovers_cluster_centers(self, gaussian_blobs):
         """On well-separated blobs, centroids should lie near the true centers."""
         X, centers = gaussian_blobs
-        ip = kmeans(X, 3, rng=0)
+        ip = kmeans_init(X, 3, rng=0)
         dists = np.linalg.norm(ip.Z[:, None, :] - centers[None, :, :], axis=-1)
         assert np.all(dists.min(axis=0) < 0.5)
 
     def test_rejects_m_too_large(self):
         X = np.random.default_rng(0).standard_normal((5, 2))
         with pytest.raises(ValueError, match="exceeds"):
-            kmeans(X, 20)
+            kmeans_init(X, 20)
 
 
 class TestGreedyVariance:
     def test_returns_inducing_points(self):
         X = np.random.default_rng(0).standard_normal((50, 2))
         kernel = ExpQuad(input_dim=2, ls=1.0)
-        ip = greedy_variance(X, 10, kernel, rng=0)
-        assert isinstance(ip, InducingPoints)
+        ip = greedy_variance_init(X, 10, kernel, rng=0)
+        assert isinstance(ip, Points)
         assert isinstance(ip.Z, np.ndarray)
         assert ip.Z.shape == (10, 2)
 
     def test_rows_are_in_x(self):
         X = np.random.default_rng(0).standard_normal((50, 2))
         kernel = ExpQuad(input_dim=2, ls=1.0)
-        ip = greedy_variance(X, 15, kernel, rng=0)
+        ip = greedy_variance_init(X, 15, kernel, rng=0)
         for z in ip.Z:
             assert np.any(np.all(np.isclose(X, z), axis=1))
 
@@ -107,9 +111,9 @@ class TestGreedyVariance:
         kernel = ExpQuad(input_dim=1, ls=1.0)
         M = 10
 
-        greedy_err = _nystrom_residual_trace(X, greedy_variance(X, M, kernel, rng=0).Z, kernel)
+        greedy_err = _nystrom_residual_trace(X, greedy_variance_init(X, M, kernel, rng=0).Z, kernel)
         random_errs = [
-            _nystrom_residual_trace(X, random_subsample(X, M, rng=s).Z, kernel) for s in range(10)
+            _nystrom_residual_trace(X, random_subsample_init(X, M, rng=s).Z, kernel) for s in range(10)
         ]
         assert greedy_err < np.mean(random_errs)
 
@@ -118,19 +122,19 @@ class TestGreedyVariance:
         rng = np.random.default_rng(0)
         X = rng.standard_normal((30, 2))
         kernel = ExpQuad(input_dim=2, ls=1.0)
-        ip = greedy_variance(X, 25, kernel, threshold=1e6, rng=0)
+        ip = greedy_variance_init(X, 25, kernel, threshold=1e6, rng=0)
         assert ip.Z.shape[0] < 25
 
     def test_rejects_non_kernel(self):
         X = np.random.default_rng(0).standard_normal((20, 2))
         with pytest.raises(TypeError, match="ptgp Kernel"):
-            greedy_variance(X, 5, kernel=lambda X, Y=None: X @ X.T)
+            greedy_variance_init(X, 5, kernel=lambda X, Y=None: X @ X.T)
 
     def test_rejects_m_too_large(self):
         X = np.random.default_rng(0).standard_normal((5, 2))
         kernel = ExpQuad(input_dim=2, ls=1.0)
         with pytest.raises(ValueError, match="exceeds"):
-            greedy_variance(X, 20, kernel)
+            greedy_variance_init(X, 20, kernel)
 
 
 class TestIntegrationWithSVGP:
@@ -146,7 +150,7 @@ class TestIntegrationWithSVGP:
         y = np.sin(X[:, 0]) + 0.1 * rng.standard_normal(40)
         kernel = ExpQuad(input_dim=1, ls=1.0)
 
-        ip = greedy_variance(X, 5, kernel, rng=0)
+        ip = greedy_variance_init(X, 5, kernel, rng=0)
         svgp = SVGP(
             kernel=kernel,
             likelihood=Gaussian(sigma=0.1),

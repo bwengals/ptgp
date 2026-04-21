@@ -123,7 +123,7 @@ def test_compile_training_step_svgp(svgp_data):
         svgp = pg.gp.SVGP(
             kernel=kernel,
             likelihood=pg.likelihoods.Gaussian(sigma=0.1),
-            inducing_variable=pg.inducing_variables.InducingPoints(pt.as_tensor_variable(Z_init)),
+            inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z_init)),
             q_mu=q_mu_var,
             q_sqrt=q_sqrt_var,
         )

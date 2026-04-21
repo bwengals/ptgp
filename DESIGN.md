@@ -99,7 +99,7 @@ Shared `base_conditional(Kmn, Kmm, Knn, f, q_sqrt=None, white=False)` function (
 Class hierarchy following GPflow, enabling dispatch for inter-domain/multiscale/structured inducing points:
 
 - `InducingVariables` — base class
-- `InducingPoints(Z)` — standard real-space inducing points
+- `Points(Z)` — standard real-space inducing points
 
 ## Likelihoods
 
