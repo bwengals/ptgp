@@ -150,6 +150,51 @@ def test_compile_training_step_svgp(svgp_data):
     assert losses[-1] < losses[0], "SVGP loss should decrease during training"
 
 
+def test_prior_shifts_optimum(gp_data):
+    """Training with include_prior=True converges to a different point
+    than include_prior=False when the prior is strong enough to pull
+    the optimum away from the MLE.
+    """
+    X, y = gp_data
+
+    def build():
+        with pm.Model() as model:
+            # Tight prior on ls, far from whatever the MLE would pick.
+            ls = pm.Normal("ls", mu=5.0, sigma=0.01)
+            eta = pm.Exponential("eta", lam=1.0)
+            sigma = pm.Exponential("sigma", lam=1.0)
+            kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
+            gp = pg.gp.Unapproximated(
+                kernel=kernel, likelihood=pg.likelihoods.Gaussian(sigma=sigma)
+            )
+        return model, gp
+
+    def train(include_prior):
+        model, gp = build()
+        X_var = pt.matrix("X")
+        y_var = pt.vector("y")
+        train_step, shared_params, _ = pg.optim.compile_training_step(
+            pg.objectives.marginal_log_likelihood,
+            gp,
+            X_var,
+            y_var,
+            model=model,
+            learning_rate=1e-2,
+            include_prior=include_prior,
+        )
+        for _ in range(500):
+            train_step(X, y)
+        return pg.optim.get_trained_params(model, shared_params)
+
+    mle = train(include_prior=False)
+    map_ = train(include_prior=True)
+
+    # The tight prior should pin ls near 5.0 in constrained space.
+    assert abs(map_["ls"] - 5.0) < 0.1
+    # The MLE is free to wander far from the prior mean.
+    assert abs(mle["ls"] - 5.0) > 0.5
+
+
 def test_sgd_optimizer(gp_data):
     """SGD optimizer works as alternative to adam."""
     X, y = gp_data
