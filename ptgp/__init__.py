@@ -1,7 +1,6 @@
 from ptgp import (
     gp,
-    inducing_init,
-    inducing_variables,
+    inducing,
     inference,
     kernels,
     likelihoods,
@@ -12,8 +11,7 @@ from ptgp import (
 
 __all__ = [
     "gp",
-    "inducing_init",
-    "inducing_variables",
+    "inducing",
     "inference",
     "kernels",
     "likelihoods",

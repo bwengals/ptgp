@@ -6,7 +6,7 @@ import pytensor.tensor as pt
 import pytest
 
 from ptgp.gp import SVGP, VFE, Unapproximated
-from ptgp.inducing_variables import InducingPoints
+from ptgp.inducing import Points
 from ptgp.kernels import ExpQuad
 from ptgp.likelihoods import Gaussian
 from ptgp.mean import Zero
@@ -61,7 +61,7 @@ class TestELBO:
             kernel=ExpQuad(input_dim=1, ls=1.0),
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
-            inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
+            inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
         )
         elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(elbo_val)
@@ -72,7 +72,7 @@ class TestELBO:
             kernel=ExpQuad(input_dim=1, ls=1.0),
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
-            inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
+            inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
             whiten=False,
         )
         elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
@@ -90,7 +90,7 @@ class TestELBO:
             kernel=kernel,
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
-            inducing_variable=InducingPoints(Z),
+            inducing_variable=Points(Z),
             whiten=True,
         )
         elbo_w = _eval(elbo(svgp_w, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
@@ -102,7 +102,7 @@ class TestELBO:
             kernel=kernel,
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
-            inducing_variable=InducingPoints(Z),
+            inducing_variable=Points(Z),
             whiten=False,
             q_mu=pt.zeros(5),
             q_sqrt=pt.as_tensor_variable(Luu),
@@ -126,7 +126,7 @@ class TestELBO:
             kernel=kernel,
             mean=Zero(),
             likelihood=Gaussian(sigma=sigma),
-            inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
+            inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
         )
         elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 
@@ -140,7 +140,7 @@ class TestCollapsedELBO:
             kernel=ExpQuad(input_dim=1, ls=1.0),
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
-            inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
+            inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
         )
         celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(celbo)
@@ -160,7 +160,7 @@ class TestCollapsedELBO:
             kernel=kernel,
             mean=Zero(),
             likelihood=Gaussian(sigma=sigma),
-            inducing_variable=InducingPoints(pt.as_tensor_variable(inducing_points)),
+            inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
         )
         celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 
