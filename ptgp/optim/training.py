@@ -14,7 +14,7 @@ from pytensor.graph.replace import graph_replace
 from ptgp.optim.optimizers import adam
 
 
-def _make_shared_params(pm_model, extra_vars=None, extra_init=None):
+def _make_shared_params(model, extra_vars=None, extra_init=None):
     """Create shared variables for a PyMC model's value vars and any extras.
 
     Returns
@@ -26,9 +26,9 @@ def _make_shared_params(pm_model, extra_vars=None, extra_init=None):
     all_shared : list
         All shared variables in order: value vars then extras.
     """
-    ip = pm_model.initial_point()
+    ip = model.initial_point()
     shared_params = {}
-    for vv in pm_model.continuous_value_vars:
+    for vv in model.continuous_value_vars:
         shared_params[vv] = pytensor.shared(
             np.asarray(ip[vv.name], dtype=np.float64),
             name=vv.name,
@@ -45,7 +45,7 @@ def _make_shared_params(pm_model, extra_vars=None, extra_init=None):
 
 def _replace_graph(
     outputs,
-    pm_model,
+    model,
     shared_params,
     extra_vars=None,
     shared_extras=None,
@@ -59,7 +59,7 @@ def _replace_graph(
     graph, since not all parameters may be used (e.g. likelihood sigma is
     absent from SVGP's predict graph).
     """
-    replaced = pm_model.replace_rvs_by_values(outputs)
+    replaced = model.replace_rvs_by_values(outputs)
     replace_map = dict(shared_params)
     if extra_vars is not None and shared_extras is not None:
         for var, sv in zip(extra_vars, shared_extras):
@@ -78,7 +78,7 @@ def compile_training_step(
     gp_model,
     X_var,
     y_var,
-    pm_model=None,
+    model=None,
     optimizer_fn=None,
     extra_vars=None,
     extra_init=None,
@@ -99,16 +99,17 @@ def compile_training_step(
         Symbolic input placeholder.
     y_var : TensorVariable
         Symbolic target placeholder.
-    pm_model : pm.Model, optional
-        PyMC model context. Uses current context if None. Every continuous
-        free RV in the model is automatically made into a trainable shared
-        variable — you do not need to list them.
+    model : pm.Model, optional
+        PyMC model. Uses the enclosing ``with pm.Model()`` context if
+        None. Every continuous free RV in the model is automatically
+        made into a trainable shared variable — you do not need to list
+        them.
     optimizer_fn : callable, optional
         Optimizer function (default: ``adam``). Must have signature
         ``(loss, params, **kwargs) -> updates_dict``.
     extra_vars : list of TensorVariable, optional
         Additional symbolic variables to optimize that are not PyMC RVs and
-        so cannot be discovered from ``pm_model``. Typical entries: SVGP
+        so cannot be discovered from ``model``. Typical entries: SVGP
         ``q_mu`` / ``q_sqrt``, or a trainable inducing-point ``Z_var``.
     extra_init : list of ndarray, optional
         Initial values for ``extra_vars``, in the same order. Required
@@ -142,7 +143,7 @@ def compile_training_step(
     shared_extras : list
         Shared variables for ``extra_vars``. Needed by ``compile_predict``.
     """
-    pm_model = pm.modelcontext(pm_model)
+    model = pm.modelcontext(model)
     if optimizer_fn is None:
         optimizer_fn = adam
 
@@ -156,7 +157,7 @@ def compile_training_step(
             )
 
     shared_params, shared_extras, all_shared = _make_shared_params(
-        pm_model,
+        model,
         extra_vars,
         extra_init,
     )
@@ -182,7 +183,7 @@ def compile_training_step(
     loss = -objective_fn(gp_model, X_var, y_var)
     [loss_replaced] = _replace_graph(
         [loss],
-        pm_model,
+        model,
         shared_params,
         extra_vars,
         shared_extras,
@@ -204,7 +205,7 @@ def compile_scipy_objective(
     gp_model,
     X_var,
     y_var,
-    pm_model=None,
+    model=None,
     extra_vars=None,
     extra_init=None,
     frozen_vars=None,
@@ -232,13 +233,13 @@ def compile_scipy_objective(
         inputs for GP/VFE (batching is not used with quasi-Newton methods).
     y_var : TensorVariable
         Symbolic target placeholder, handled like ``X_var``.
-    pm_model : pm.Model, optional
-        PyMC model context. Uses the current context if None. Every
-        continuous free RV becomes a slice of ``theta``; you do not need
-        to list them.
+    model : pm.Model, optional
+        PyMC model. Uses the enclosing ``with pm.Model()`` context if
+        None. Every continuous free RV becomes a slice of ``theta``; you
+        do not need to list them.
     extra_vars : list of TensorVariable, optional
         Additional symbolic variables to optimize that are not PyMC RVs
-        (so cannot be discovered from ``pm_model``). Typical entries: VFE
+        (so cannot be discovered from ``model``). Typical entries: VFE
         inducing-point ``Z_var``, or SVGP ``q_mu`` / ``q_sqrt``.
     extra_init : list of ndarray, optional
         Initial values for ``extra_vars``, in the same order. Required
@@ -260,9 +261,9 @@ def compile_scipy_objective(
         method=...)``.
     theta0 : ndarray
         Flat initial parameter vector. Layout: PyMC value vars in
-        ``pm_model.continuous_value_vars`` order, followed by
+        ``model.continuous_value_vars`` order, followed by
         ``extra_vars`` in the order given. Values come from
-        ``pm_model.initial_point()`` and ``extra_init``. Use as the
+        ``model.initial_point()`` and ``extra_init``. Use as the
         ``x0`` argument to ``scipy.optimize.minimize``.
     unpack_to_shared : callable
         ``(theta) -> None``. Slices ``theta`` along the same layout as
@@ -279,13 +280,13 @@ def compile_scipy_objective(
         Shared variables for ``extra_vars``, in the same order. Needed
         by :func:`compile_predict`. Not read by ``fun``.
     """
-    pm_model = pm.modelcontext(pm_model)
+    model = pm.modelcontext(model)
 
     shared_params, shared_extras, _ = _make_shared_params(
-        pm_model, extra_vars, extra_init,
+        model, extra_vars, extra_init,
     )
 
-    value_vars_ordered = list(pm_model.continuous_value_vars)
+    value_vars_ordered = list(model.continuous_value_vars)
     layout = []
     theta0_pieces = []
     for vv in value_vars_ordered:
@@ -308,7 +309,7 @@ def compile_scipy_objective(
         offset += size
 
     loss = -objective_fn(gp_model, X_var, y_var)
-    [loss_rvs_replaced] = pm_model.replace_rvs_by_values([loss])
+    [loss_rvs_replaced] = model.replace_rvs_by_values([loss])
 
     replace_map = {}
     piece_iter = iter(pieces)
@@ -337,13 +338,13 @@ def compile_scipy_objective(
     return fun, theta0, unpack_to_shared, shared_params, shared_extras
 
 
-def get_trained_params(pm_model, shared_params):
+def get_trained_params(model, shared_params):
     """Get trained hyperparameter values in the original (constrained) space.
 
     Parameters
     ----------
-    pm_model : pm.Model
-        The PyMC model context used in training.
+    model : pm.Model
+        The PyMC model used in training.
     shared_params : dict
         ``{value_var: shared_var}`` from ``compile_training_step``.
 
@@ -353,9 +354,9 @@ def get_trained_params(pm_model, shared_params):
         ``{rv_name: constrained_value}`` for each free RV in the model.
     """
     result = {}
-    for rv in pm_model.free_RVs:
-        vv = pm_model.rvs_to_values[rv]
-        transform = pm_model.rvs_to_transforms[rv]
+    for rv in model.free_RVs:
+        vv = model.rvs_to_values[rv]
+        transform = model.rvs_to_transforms[rv]
         unconstrained = shared_params[vv].get_value()
         constrained = transform.backward(unconstrained).eval()
         result[rv.name] = float(constrained) if constrained.ndim == 0 else constrained
@@ -365,7 +366,7 @@ def get_trained_params(pm_model, shared_params):
 def compile_predict(
     gp_model,
     X_new_var,
-    pm_model,
+    model,
     shared_params,
     extra_vars=None,
     shared_extras=None,
@@ -381,8 +382,8 @@ def compile_predict(
         The same PTGP model object used in training.
     X_new_var : TensorVariable
         Symbolic variable for prediction inputs.
-    pm_model : pm.Model
-        The PyMC model context used in training.
+    model : pm.Model
+        The PyMC model used in training.
     shared_params : dict
         ``{value_var: shared_var}`` from ``compile_training_step``.
     extra_vars : list of TensorVariable, optional
@@ -413,7 +414,7 @@ def compile_predict(
 
     [mean_s, var_s] = _replace_graph(
         [mean, var],
-        pm_model,
+        model,
         shared_params,
         extra_vars,
         shared_extras,

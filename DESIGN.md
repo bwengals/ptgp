@@ -46,7 +46,7 @@ with pm.Model() as model:
 
 # Compile training step — parameters stored as shared variables
 train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-    pg.objectives.marginal_log_likelihood, gp, X_var, y_var, pm_model=model,
+    pg.objectives.marginal_log_likelihood, gp, X_var, y_var, model=model,
 )
 
 for i in range(500):

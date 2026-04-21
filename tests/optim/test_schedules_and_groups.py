@@ -144,7 +144,7 @@ class TestCompileTrainingStepGroups:
             gp,
             X_var,
             y_var,
-            pm_model=model,
+            model=model,
             param_groups={
                 "kernel": [ls_vv, eta_vv],
                 "noise": [sigma_vv],
@@ -182,7 +182,7 @@ class TestCompileTrainingStepGroups:
                 gp,
                 X_var,
                 y_var,
-                pm_model=model,
+                model=model,
                 param_groups={"all": [stranger]},
                 learning_rate={"all": 1e-2},
             )
