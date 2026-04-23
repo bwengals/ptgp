@@ -34,6 +34,10 @@ class RandomWalk(Kernel):
             K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
         return K
 
+    def diag(self, X):
+        """Diagonal of K(X, X). min(x, x) = x."""
+        return X[:, self.active_dims[0]]
+
 
 class Gibbs(Kernel):
     """Gibbs kernel with a location-dependent lengthscale function.
@@ -81,6 +85,10 @@ class Gibbs(Kernel):
             K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
         return K
 
+    def diag(self, X):
+        """Diagonal of K(X, X). k(x, x) = 1 for any lengthscale function."""
+        return pt.ones(X.shape[0])
+
 
 class WarpedInput(Kernel):
     """Warp the inputs of another kernel with an arbitrary function.
@@ -117,3 +125,7 @@ class WarpedInput(Kernel):
             return self.kernel_func(Xw)
         Yw = self.warp_func(Y[:, self.active_dims])
         return self.kernel_func(Xw, Yw)
+
+    def diag(self, X):
+        """Diagonal of K(X, X): warp the inputs, then delegate to inner kernel."""
+        return self.kernel_func.diag(self.warp_func(X[:, self.active_dims]))

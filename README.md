@@ -61,7 +61,6 @@ For the full treatment of `Unapproximated`, `VFE`, and `SVGP` (including minibat
 - **PyTensor** (`assumption-system` branch, PR #2032): symbolic computation and graph rewrites driven by declared matrix structure
 - **PyMC**: `pm.Model()` as a prior container for hyperparameters — no PyMC samplers or inference routines
 - **Native PyTensor optimizers** (`ptgp.optim`): L-BFGS-B (via scipy) and Adam / SGD with `pytensor.shared` parameters — no JAX required
-- **JAX + Optax** (`ptgp.inference`, optional): alternative L-BFGS-B and Optax SGD via JAX compilation
 
 ## Kernels
 
