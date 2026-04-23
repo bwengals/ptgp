@@ -56,7 +56,7 @@ class VFE:
         Kuu = self.kernel(Z)  # (M, M)
         Kuf = self.kernel(Z, X_train)  # (M, N)
         Kus = self.kernel(Z, X_new)  # (M, N*)
-        Kss_diag = self.kernel_diag(X_new)
+        Kss_diag = self.kernel.diag(X_new)
 
         # Sigma = Kuu + Kuf @ Kuf.T / sigma^2
         Sigma = Kuu + Kuf @ Kuf.T / sigma2
@@ -75,7 +75,3 @@ class VFE:
         if incl_lik:
             return self.likelihood.predict_mean_and_var(fmean, fvar)
         return fmean, fvar
-
-    def kernel_diag(self, X):
-        """Diagonal of K(X, X)."""
-        return pt.diag(self.kernel(X))

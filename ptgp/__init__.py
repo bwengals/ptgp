@@ -1,7 +1,6 @@
 from ptgp import (
     gp,
     inducing,
-    inference,
     kernels,
     likelihoods,
     mean,
@@ -12,7 +11,6 @@ from ptgp import (
 __all__ = [
     "gp",
     "inducing",
-    "inference",
     "kernels",
     "likelihoods",
     "mean",

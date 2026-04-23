@@ -50,7 +50,7 @@ class Unapproximated:
         Knn = self.kernel(X_train)
         Knn_noisy = Knn + self.likelihood.sigma**2 * pt.eye(X_train.shape[0])
         Kns = self.kernel(X_train, X_new)  # (N, N*)
-        Kss_diag = self.kernel_diag(X_new)
+        Kss_diag = self.kernel.diag(X_new)
 
         Knn_inv = pt.linalg.inv(Knn_noisy)
 
@@ -61,7 +61,3 @@ class Unapproximated:
         if incl_lik:
             return self.likelihood.predict_mean_and_var(fmean, fvar)
         return fmean, fvar
-
-    def kernel_diag(self, X):
-        """Diagonal of K(X, X)."""
-        return pt.diag(self.kernel(X))

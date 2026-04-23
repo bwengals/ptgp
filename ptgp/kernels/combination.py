@@ -32,6 +32,10 @@ class SumKernel(Kernel):
             K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
         return K
 
+    def diag(self, X):
+        """Diagonal of K(X, X) = diag(k1) + diag(k2)."""
+        return self.k1.diag(X) + self.k2.diag(X)
+
 
 class ProductKernel(Kernel):
     """Product of two kernels: k(x, y) = k1(x, y) * k2(x, y).
@@ -61,3 +65,13 @@ class ProductKernel(Kernel):
         if symmetric:
             K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
         return K
+
+    def diag(self, X):
+        """Diagonal of K(X, X) = diag(k1) * diag(k2). Handles scalar * kernel."""
+        k1_is_kernel = isinstance(self.k1, Kernel)
+        k2_is_kernel = isinstance(self.k2, Kernel)
+        if k1_is_kernel and k2_is_kernel:
+            return self.k1.diag(X) * self.k2.diag(X)
+        if k1_is_kernel:
+            return self.k1.diag(X) * self.k2
+        return self.k1 * self.k2.diag(X)

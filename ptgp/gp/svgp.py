@@ -71,7 +71,7 @@ class SVGP:
         Z = self.inducing_variable.Z
         Kmm = self.kernel(Z)
         Kmn = self.kernel(Z, X)
-        Knn_diag = self.kernel_diag(X)
+        Knn_diag = self.kernel.diag(X)
 
         fmean, fvar = base_conditional(
             Kmn, Kmm, Knn_diag, self.q_mu, self.q_sqrt, white=self.whiten
@@ -141,7 +141,3 @@ class SVGP:
         else:
             Kuu = self.kernel(self.inducing_variable.Z)
             return gauss_kl(self.q_mu, self.q_sqrt, K=Kuu)
-
-    def kernel_diag(self, X):
-        """Diagonal of K(X, X)."""
-        return pt.diag(self.kernel(X))

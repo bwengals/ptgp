@@ -93,7 +93,7 @@ def collapsed_elbo(vfe, X, y):
     Z = vfe.inducing_variable.Z
 
     mu = vfe.mean(X)
-    Kff_diag = vfe.kernel_diag(X)
+    Kff_diag = vfe.kernel.diag(X)
     Kuf = vfe.kernel(Z, X)  # (M, N)
     Kuu = vfe.kernel(Z)  # (M, M)
 

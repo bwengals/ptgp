@@ -61,6 +61,10 @@ class Stationary(Kernel):
         Y = self._slice_input(Y) / self.ls
         return _euclidean_distance(X, Y)
 
+    def diag(self, X):
+        """Diagonal of K(X, X). For any stationary kernel this is ones."""
+        return pt.ones(X.shape[0])
+
 
 class ExpQuad(Stationary):
     """Exponentiated quadratic (RBF / squared exponential) kernel.
