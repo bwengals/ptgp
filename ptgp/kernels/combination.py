@@ -1,5 +1,3 @@
-import pytensor.tensor as pt
-
 from ptgp.kernels.base import Kernel
 
 
@@ -25,12 +23,8 @@ class SumKernel(Kernel):
         elif isinstance(k2, Kernel):
             self.input_dim = k2.input_dim
 
-    def __call__(self, X, Y=None):
-        symmetric = Y is None
-        K = self.k1(X, Y) + self.k2(X, Y)
-        if symmetric:
-            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
-        return K
+    def _eval(self, X, Y):
+        return self.k1(X, Y) + self.k2(X, Y)
 
     def diag(self, X):
         """Diagonal of K(X, X) = diag(k1) + diag(k2)."""
@@ -52,19 +46,14 @@ class ProductKernel(Kernel):
         elif isinstance(k2, Kernel):
             self.input_dim = k2.input_dim
 
-    def __call__(self, X, Y=None):
-        symmetric = Y is None
+    def _eval(self, X, Y):
         k1_is_kernel = isinstance(self.k1, Kernel)
         k2_is_kernel = isinstance(self.k2, Kernel)
         if k1_is_kernel and k2_is_kernel:
-            K = self.k1(X, Y) * self.k2(X, Y)
-        elif k1_is_kernel:
-            K = self.k1(X, Y) * self.k2
-        else:
-            K = self.k1 * self.k2(X, Y)
-        if symmetric:
-            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
-        return K
+            return self.k1(X, Y) * self.k2(X, Y)
+        if k1_is_kernel:
+            return self.k1(X, Y) * self.k2
+        return self.k1 * self.k2(X, Y)
 
     def diag(self, X):
         """Diagonal of K(X, X) = diag(k1) * diag(k2). Handles scalar * kernel."""

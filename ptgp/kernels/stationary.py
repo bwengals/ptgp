@@ -74,14 +74,8 @@ class ExpQuad(Stationary):
     Scale with multiplication: eta**2 * ExpQuad(input_dim=..., ls=ls)
     """
 
-    def __call__(self, X, Y=None):
-        symmetric = Y is None
-        if symmetric:
-            Y = X
-        K = pt.exp(-0.5 * self._scaled_sq_dist(X, Y))
-        if symmetric:
-            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
-        return K
+    def _eval(self, X, Y):
+        return pt.exp(-0.5 * self._scaled_sq_dist(X, Y))
 
 
 class Matern52(Stationary):
@@ -91,16 +85,10 @@ class Matern52(Stationary):
     where r = ||x - y|| / ls
     """
 
-    def __call__(self, X, Y=None):
-        symmetric = Y is None
-        if symmetric:
-            Y = X
+    def _eval(self, X, Y):
         tau = self._scaled_euclid_dist(X, Y)
         sqrt5 = pt.sqrt(5.0)
-        K = (1.0 + sqrt5 * tau + 5.0 / 3.0 * pt.square(tau)) * pt.exp(-sqrt5 * tau)
-        if symmetric:
-            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
-        return K
+        return (1.0 + sqrt5 * tau + 5.0 / 3.0 * pt.square(tau)) * pt.exp(-sqrt5 * tau)
 
 
 class Matern32(Stationary):
@@ -110,16 +98,10 @@ class Matern32(Stationary):
     where r = ||x - y|| / ls
     """
 
-    def __call__(self, X, Y=None):
-        symmetric = Y is None
-        if symmetric:
-            Y = X
+    def _eval(self, X, Y):
         tau = self._scaled_euclid_dist(X, Y)
         sqrt3 = pt.sqrt(3.0)
-        K = (1.0 + sqrt3 * tau) * pt.exp(-sqrt3 * tau)
-        if symmetric:
-            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
-        return K
+        return (1.0 + sqrt3 * tau) * pt.exp(-sqrt3 * tau)
 
 
 class Matern12(Stationary):
@@ -129,12 +111,6 @@ class Matern12(Stationary):
     where r = ||x - y|| / ls
     """
 
-    def __call__(self, X, Y=None):
-        symmetric = Y is None
-        if symmetric:
-            Y = X
+    def _eval(self, X, Y):
         tau = self._scaled_euclid_dist(X, Y)
-        K = pt.exp(-tau)
-        if symmetric:
-            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
-        return K
+        return pt.exp(-tau)

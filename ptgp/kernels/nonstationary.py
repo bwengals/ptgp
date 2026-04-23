@@ -24,15 +24,11 @@ class RandomWalk(Kernel):
         if len(self.active_dims) != 1:
             raise ValueError("RandomWalk kernel requires active_dims of length 1")
 
-    def __call__(self, X, Y=None):
-        """Evaluate K(X, Y); K(X, X) if Y is None, annotated symmetric+PSD."""
-        symmetric = Y is None
+    def _eval(self, X, Y):
+        """Pairwise min over the active dim."""
         Xa = X[:, self.active_dims]
-        Ya = Xa if symmetric else Y[:, self.active_dims]
-        K = pt.minimum(Xa, Ya.T)
-        if symmetric:
-            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
-        return K
+        Ya = Y[:, self.active_dims]
+        return pt.minimum(Xa, Ya.T)
 
     def diag(self, X):
         """Diagonal of K(X, X). min(x, x) = x."""
@@ -65,25 +61,17 @@ class Gibbs(Kernel):
             raise TypeError("lengthscale_func must be callable")
         self.lengthscale_func = lengthscale_func
 
-    def __call__(self, X, Y=None):
-        """Evaluate K(X, Y); K(X, X) if Y is None, annotated symmetric+PSD."""
-        symmetric = Y is None
+    def _eval(self, X, Y):
+        """Evaluate the Gibbs kernel with per-point lengthscales."""
         Xa = X[:, self.active_dims]
+        Ya = Y[:, self.active_dims]
         rx = self.lengthscale_func(Xa)
-        if symmetric:
-            Ya = Xa
-            ry = rx
-        else:
-            Ya = Y[:, self.active_dims]
-            ry = self.lengthscale_func(Ya)
+        ry = self.lengthscale_func(Ya)
         r2 = _squared_distance(Xa, Ya)
         rx2 = pt.reshape(pt.square(rx), (-1, 1))
         ry2 = pt.reshape(pt.square(ry), (1, -1))
         denom = rx2 + ry2
-        K = pt.sqrt(2.0 * pt.outer(rx, ry) / denom) * pt.exp(-r2 / denom)
-        if symmetric:
-            K = pt.specify_assumptions(K, symmetric=True, positive_definite=True)
-        return K
+        return pt.sqrt(2.0 * pt.outer(rx, ry) / denom) * pt.exp(-r2 / denom)
 
     def diag(self, X):
         """Diagonal of K(X, X). k(x, x) = 1 for any lengthscale function."""
@@ -118,11 +106,9 @@ class WarpedInput(Kernel):
         self.kernel_func = kernel_func
         self.warp_func = warp_func
 
-    def __call__(self, X, Y=None):
-        """Apply ``warp_func`` to inputs, then evaluate the inner kernel."""
+    def _eval(self, X, Y):
+        """Warp both inputs, then delegate to the inner kernel."""
         Xw = self.warp_func(X[:, self.active_dims])
-        if Y is None:
-            return self.kernel_func(Xw)
         Yw = self.warp_func(Y[:, self.active_dims])
         return self.kernel_func(Xw, Yw)
 

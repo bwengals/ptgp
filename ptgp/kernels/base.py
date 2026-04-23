@@ -1,13 +1,13 @@
 import numpy as np
+import pytensor.tensor as pt
 
 
 class Kernel:
     """Base class for all PTGP kernels.
 
-    Subclasses must implement ``__call__(self, X, Y=None)``.  When called with
-    a single argument (Y is None) the kernel matrix K(X, X) is returned and
-    annotated as symmetric and positive-definite via PyTensor's assumption
-    system.  When called with two arguments K(X, Y) is returned unannotated.
+    Subclasses implement ``_eval(self, X, Y)`` (raw kernel math, both args
+    always given) and ``diag(self, X)``. The base ``__call__`` handles the
+    K(X, X) case and attaches symmetric/PSD assumptions.
 
     Parameters
     ----------
@@ -31,7 +31,18 @@ class Kernel:
                 )
 
     def __call__(self, X, Y=None):
-        """Return the kernel matrix K(X, Y) — or K(X, X) if Y is None."""
+        """K(X, Y); K(X, X) if Y is None, annotated symmetric and PSD."""
+        if Y is None:
+            K = self._eval(X, X)
+            return pt.specify_assumptions(K, symmetric=True, positive_definite=True)
+        return self._eval(X, Y)
+
+    def _eval(self, X, Y):
+        """Raw kernel matrix — subclasses implement."""
+        raise NotImplementedError
+
+    def diag(self, X):
+        """Diagonal of K(X, X) — subclasses implement."""
         raise NotImplementedError
 
     def __add__(self, other):
