@@ -1,7 +1,7 @@
 import pytensor.tensor as pt
 
 
-def base_conditional(Kmn, Kmm, Knn, f, q_sqrt=None, white=False):
+def base_conditional(Kmn, Kmm, Knn, f, q_sqrt=None, white=False, full_cov=False):
     """Compute the posterior conditional q(f*) = integral q(u) p(f*|u) du.
 
     Given:
@@ -15,8 +15,10 @@ def base_conditional(Kmn, Kmm, Knn, f, q_sqrt=None, white=False):
         Cross-covariance between inducing and prediction points.
     Kmm : tensor, shape (M, M)
         Inducing point covariance (annotated PSD).
-    Knn : tensor, shape (N,)
-        Diagonal of prediction point covariance.
+    Knn : tensor
+        If ``full_cov=False``, shape (N,), the diagonal of the prediction
+        covariance. If ``full_cov=True``, shape (N, N), the full prediction
+        covariance.
     f : tensor, shape (M,)
         Variational mean (or posterior mean for exact GP).
     q_sqrt : tensor, shape (M, M), optional
@@ -25,49 +27,47 @@ def base_conditional(Kmn, Kmm, Knn, f, q_sqrt=None, white=False):
     white : bool
         If True, f and q_sqrt are in the whitened parameterization
         (prior on v is N(0, I) instead of N(0, Kmm)).
+    full_cov : bool
+        If True, return the full (N, N) posterior covariance; otherwise
+        return the (N,) marginal variance.
 
     Returns
     -------
     fmean : tensor, shape (N,)
         Posterior mean.
-    fvar : tensor, shape (N,)
-        Posterior variance (diagonal).
+    fvar : tensor
+        Posterior variance — shape (N,) if ``full_cov=False``, (N, N) otherwise.
     """
     Kmm_inv = pt.linalg.inv(Kmm)
 
     # A = Kmm^{-1} @ Kmn, shape (M, N)
     A = Kmm_inv @ Kmn
 
-    # Prior conditional mean and variance
-    # fmean = Kmn.T @ Kmm^{-1} @ f = A.T @ f
-    # fvar = Knn - diag(Kmn.T @ Kmm^{-1} @ Kmn) = Knn - diag(A.T @ Kmn)
     if white:
-        # In whitened parameterization, u = Lmm @ v where Lmm = chol(Kmm).
-        # p(f*|v) = N(Kmn.T @ Kmm^{-1} @ Lmm @ v, ...)
-        # Since Kmm = Lmm @ Lmm.T, Kmm^{-1} @ Lmm = Lmm^{-T}
-        # So the mean becomes Kmn.T @ Lmm^{-T} @ v
-        # We need: fmean = Kmn.T @ Lmm^{-T} @ f
-        # But we can write Lmm^{-T} = Kmm^{-1} @ Lmm
-        # Equivalently: fmean = (Lmm^{-1} @ Kmn).T @ f
-        # Using naive linalg: Lmm = chol(Kmm), but we want to stay naive.
-        # Actually in whitened coords: the mapping is through Lmm.
-        # Let's compute Lmm and use it.
         Lmm = pt.linalg.cholesky(Kmm)
         # A_white = Lmm^{-1} @ Kmn
         A_white = pt.linalg.solve(Lmm, Kmn)
         fmean = A_white.T @ f
-        fvar = Knn - pt.sum(A_white**2, axis=0)
+        if full_cov:
+            fvar = Knn - A_white.T @ A_white
+        else:
+            fvar = Knn - pt.sum(A_white**2, axis=0)
     else:
         fmean = A.T @ f
-        fvar = Knn - pt.sum(A * Kmn, axis=0)
+        if full_cov:
+            fvar = Knn - A.T @ Kmn
+        else:
+            fvar = Knn - pt.sum(A * Kmn, axis=0)
 
     if q_sqrt is not None:
-        # Add variational uncertainty
-        # Var contribution = diag(A.T @ q_cov @ A) where q_cov = q_sqrt @ q_sqrt.T
+        # Variational contribution: A.T @ q_cov @ A with q_cov = q_sqrt @ q_sqrt.T
         if white:
             B = A_white.T @ q_sqrt  # (N, M)
         else:
             B = A.T @ q_sqrt  # (N, M)
-        fvar = fvar + pt.sum(B**2, axis=1)
+        if full_cov:
+            fvar = fvar + B @ B.T
+        else:
+            fvar = fvar + pt.sum(B**2, axis=1)
 
     return fmean, fvar

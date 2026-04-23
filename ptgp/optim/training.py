@@ -422,14 +422,14 @@ def compile_predict(
         ``(X_new) -> (mean, var)`` using the trained parameter values.
     """
     if X_train is not None:
-        mean, var = gp_model.predict(
+        mean, var = gp_model.predict_marginal(
             X_new_var,
             pt.as_tensor_variable(X_train),
             pt.as_tensor_variable(y_train),
             incl_lik=incl_lik,
         )
     else:
-        mean, var = gp_model.predict(X_new_var, incl_lik=incl_lik)
+        mean, var = gp_model.predict_marginal(X_new_var, incl_lik=incl_lik)
 
     [mean_s, var_s] = _replace_graph(
         [mean, var],
