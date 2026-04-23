@@ -23,8 +23,11 @@ class Unapproximated:
         self._X_train = None
         self._y_train = None
 
-    def predict(self, X_new, X_train=None, y_train=None, incl_lik=False):
-        """Posterior predictive mean and variance.
+    def predict_marginal(self, X_new, X_train=None, y_train=None, incl_lik=False):
+        """Posterior marginal mean and variance at each point in X_new.
+
+        Returns the per-point posterior; correlations between test points
+        are discarded.
 
         Parameters
         ----------
