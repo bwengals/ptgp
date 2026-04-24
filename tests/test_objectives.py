@@ -34,15 +34,15 @@ def inducing_points():
 class TestMarginalLogLikelihood:
     def test_finite(self, regression_data):
         X, y = regression_data
-        gp = Unapproximated(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
+        gp = Unapproximated(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), sigma=0.1)
         mll = _eval(marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(mll)
 
     def test_better_fit_higher_mll(self, regression_data):
         """A kernel with reasonable params should have higher MLL than a bad one."""
         X, y = regression_data
-        gp_good = Unapproximated(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), likelihood=Gaussian(sigma=0.1))
-        gp_bad = Unapproximated(kernel=ExpQuad(input_dim=1, ls=0.01), mean=Zero(), likelihood=Gaussian(sigma=10.0))
+        gp_good = Unapproximated(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), sigma=0.1)
+        gp_bad = Unapproximated(kernel=ExpQuad(input_dim=1, ls=0.01), mean=Zero(), sigma=10.0)
 
         mll_good = _eval(
             marginal_log_likelihood(gp_good, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
@@ -117,7 +117,7 @@ class TestELBO:
         ls, sigma = 1.0, 0.1
         kernel = ExpQuad(input_dim=1, ls=ls)
 
-        gp = Unapproximated(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
+        gp = Unapproximated(kernel=kernel, mean=Zero(), sigma=sigma)
         mll_val = _eval(
             marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
         )
@@ -139,7 +139,7 @@ class TestCollapsedELBO:
         vfe_model = VFE(
             kernel=ExpQuad(input_dim=1, ls=1.0),
             mean=Zero(),
-            likelihood=Gaussian(sigma=0.1),
+            sigma=0.1,
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
         )
         celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
@@ -151,7 +151,7 @@ class TestCollapsedELBO:
         ls, sigma = 1.0, 0.1
         kernel = ExpQuad(input_dim=1, ls=ls)
 
-        gp = Unapproximated(kernel=kernel, mean=Zero(), likelihood=Gaussian(sigma=sigma))
+        gp = Unapproximated(kernel=kernel, mean=Zero(), sigma=sigma)
         mll_val = _eval(
             marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
         )
@@ -159,7 +159,7 @@ class TestCollapsedELBO:
         vfe_model = VFE(
             kernel=kernel,
             mean=Zero(),
-            likelihood=Gaussian(sigma=sigma),
+            sigma=sigma,
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
         )
         celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))

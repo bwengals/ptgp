@@ -32,10 +32,7 @@ with pm.Model() as model:
     sigma = pm.Exponential("sigma", lam=1.0)
 
     kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
-    gp = pg.gp.Unapproximated(
-        kernel=kernel,
-        likelihood=pg.likelihoods.Gaussian(sigma=sigma),
-    )
+    gp = pg.gp.Unapproximated(kernel=kernel, sigma=sigma)
 
 X_var, y_var = pt.matrix("X"), pt.vector("y")
 

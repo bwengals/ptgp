@@ -22,7 +22,7 @@ class TestScipyObjectiveGP:
             sigma = pm.HalfNormal("sigma", sigma=1.0)
             gp = pg.gp.Unapproximated(
                 kernel=eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls),
-                likelihood=pg.likelihoods.Gaussian(sigma=sigma),
+                sigma=sigma,
             )
 
         fun, theta0, _, _, _ = pg.optim.compile_scipy_objective(
@@ -46,7 +46,7 @@ class TestScipyObjectiveGP:
             sigma = pm.HalfNormal("sigma", sigma=1.0)
             gp = pg.gp.Unapproximated(
                 kernel=eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls),
-                likelihood=pg.likelihoods.Gaussian(sigma=sigma),
+                sigma=sigma,
             )
 
         fun, theta0, unpack_to_shared, shared, _ = pg.optim.compile_scipy_objective(
@@ -77,7 +77,7 @@ class TestScipyObjectiveGP:
             sigma = pm.HalfNormal("sigma", sigma=1.0)
             gp = pg.gp.Unapproximated(
                 kernel=eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls),
-                likelihood=pg.likelihoods.Gaussian(sigma=sigma),
+                sigma=sigma,
             )
 
         fun, theta0, unpack_to_shared, shared, _ = pg.optim.compile_scipy_objective(
@@ -116,7 +116,7 @@ class TestScipyObjectiveVFE:
             sigma = pm.HalfNormal("sigma", sigma=1.0)
             vfe = pg.gp.VFE(
                 kernel=eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls),
-                likelihood=pg.likelihoods.Gaussian(sigma=sigma),
+                sigma=sigma,
                 inducing_variable=pg.inducing.Points(Z_var),
             )
 
@@ -153,7 +153,7 @@ class TestScipyObjectiveFrozenVars:
             sigma = pm.HalfNormal("sigma", sigma=1.0)
             vfe = pg.gp.VFE(
                 kernel=eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls),
-                likelihood=pg.likelihoods.Gaussian(sigma=sigma),
+                sigma=sigma,
                 inducing_variable=pg.inducing.Points(Z_var),
             )
 

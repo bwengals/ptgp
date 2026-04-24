@@ -1,25 +1,29 @@
 import pytensor.tensor as pt
 
+from ptgp.likelihoods import Gaussian
 from ptgp.mean import Zero
 
 
 class Unapproximated:
     """Exact (unapproximated) Gaussian process.
 
+    The observation model is Gaussian; parameterize the noise via ``sigma``.
+
     Parameters
     ----------
     kernel : Kernel
         Covariance function.
     mean : callable, optional
-        Mean function (default: Zero()).
-    likelihood : Gaussian
-        Gaussian likelihood (exact GP requires Gaussian likelihood).
+        Mean function (default: ``Zero()``).
+    sigma : tensor or PyMC random variable
+        Observation noise standard deviation.
     """
 
-    def __init__(self, kernel, mean=None, likelihood=None):
+    def __init__(self, kernel, mean=None, sigma=None):
+        """Store the kernel and mean; build a Gaussian likelihood from sigma."""
         self.kernel = kernel
         self.mean = mean if mean is not None else Zero()
-        self.likelihood = likelihood
+        self.likelihood = Gaussian(sigma)
         self._X_train = None
         self._y_train = None
 
