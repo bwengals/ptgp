@@ -9,20 +9,27 @@ class RandomWalk(Kernel):
 
     k(x, y) = min(x, y)
 
-    Defined for positive inputs. 1D only.
+    Defined for positive inputs. Operates on a single input column.
     Scale with multiplication: eta**2 * RandomWalk()
 
     Parameters
     ----------
+    input_dim : int
+        Number of columns of ``X`` the kernel expects.
     active_dims : sequence of int, optional
-        Column of ``X`` to operate on. Must have length 1.
+        Column of ``X`` to operate on. Must have length 1. Required when
+        ``input_dim > 1``; defaults to ``[0]`` when ``input_dim == 1``.
     """
 
-    def __init__(self, active_dims=None):
-        """Fix ``input_dim=1`` and require ``active_dims`` of length 1."""
-        super().__init__(input_dim=1, active_dims=active_dims)
+    def __init__(self, input_dim=1, active_dims=None):
+        """Require a single active column; any ``input_dim`` is allowed."""
+        if active_dims is None and input_dim == 1:
+            active_dims = [0]
+        super().__init__(input_dim=input_dim, active_dims=active_dims)
         if len(self.active_dims) != 1:
-            raise ValueError("RandomWalk kernel requires active_dims of length 1")
+            raise ValueError(
+                "RandomWalk kernel requires active_dims of length 1 when input_dim > 1."
+            )
 
     def _eval(self, X, Y):
         """Pairwise min over the active dim."""
@@ -41,22 +48,29 @@ class Gibbs(Kernel):
     k(x, y) = sqrt(2 * l(x) * l(y) / (l(x)^2 + l(y)^2))
              * exp(-(x - y)^2 / (l(x)^2 + l(y)^2))
 
-    1D only.
+    Operates on a single input column.
 
     Parameters
     ----------
     lengthscale_func : callable
         ``lengthscale_func(X) -> tensor`` returning per-point lengthscales of
         shape ``(N,)`` for input ``X`` of shape ``(N, 1)``.
+    input_dim : int
+        Number of columns of ``X`` the kernel expects.
     active_dims : sequence of int, optional
-        Column of ``X`` to operate on. Must have length 1.
+        Column of ``X`` to operate on. Must have length 1. Required when
+        ``input_dim > 1``.
     """
 
-    def __init__(self, lengthscale_func, active_dims=None):
-        """Fix ``input_dim=1`` and require ``active_dims`` of length 1."""
-        super().__init__(input_dim=1, active_dims=active_dims)
+    def __init__(self, lengthscale_func, input_dim=1, active_dims=None):
+        """Require a single active column; any ``input_dim`` is allowed."""
+        if active_dims is None and input_dim == 1:
+            active_dims = [0]
+        super().__init__(input_dim=input_dim, active_dims=active_dims)
         if len(self.active_dims) != 1:
-            raise ValueError("Gibbs kernel requires active_dims of length 1")
+            raise ValueError(
+                "Gibbs kernel requires active_dims of length 1 when input_dim > 1."
+            )
         if not callable(lengthscale_func):
             raise TypeError("lengthscale_func must be callable")
         self.lengthscale_func = lengthscale_func
