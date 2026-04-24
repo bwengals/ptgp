@@ -1,6 +1,9 @@
 # Don't check in hatch-vcs generated version file
 ptgp/_version.py
 
+# Local working notes
+FUTURE.md
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
