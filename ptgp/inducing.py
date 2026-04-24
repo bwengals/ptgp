@@ -93,7 +93,7 @@ def kmeans_init(X, M, rng=None):
     return Points(centroids)
 
 
-def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
+def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None, compile_kwargs=None):
     """Greedy conditional-variance (pivoted-Cholesky) selection.
 
     Implements the "ConditionalVariance" initialization of Burt et al. (2020),
@@ -137,6 +137,11 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
     jitter : float, optional
         Small diagonal jitter for numerical stability.
     rng : int or numpy Generator, optional
+    compile_kwargs : dict, optional
+        Forwarded as ``**compile_kwargs`` to ``pytensor.function`` when
+        compiling the kernel evaluations. Use to set ``mode``
+        (e.g. ``"NUMBA"``, ``"JAX"``). Same pattern as ``pm.sample``'s
+        ``compile_kwargs``.
 
     Returns
     -------
@@ -153,8 +158,9 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None):
 
     X_sym = pt.matrix("_X", dtype="float64")
     Y_sym = pt.matrix("_Y", dtype="float64")
-    k_cross_fn = pytensor.function([X_sym, Y_sym], kernel(X_sym, Y_sym))
-    k_diag_fn = pytensor.function([X_sym], pt.diag(kernel(X_sym)))
+    ck = compile_kwargs or {}
+    k_cross_fn = pytensor.function([X_sym, Y_sym], kernel(X_sym, Y_sym), **ck)
+    k_diag_fn = pytensor.function([X_sym], pt.diag(kernel(X_sym)), **ck)
 
     perm = rng.permutation(N)
     Xp = X[perm]
