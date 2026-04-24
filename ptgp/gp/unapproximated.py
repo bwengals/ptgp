@@ -24,10 +24,8 @@ class Unapproximated:
         self.kernel = kernel
         self.mean = mean if mean is not None else Zero()
         self.likelihood = Gaussian(sigma)
-        self._X_train = None
-        self._y_train = None
 
-    def predict_marginal(self, X_new, X_train=None, y_train=None, incl_lik=False):
+    def predict_marginal(self, X_new, X_train, y_train, incl_lik=False):
         """Posterior marginal mean and variance at each point in X_new.
 
         Returns the per-point posterior; correlations between test points
@@ -36,9 +34,8 @@ class Unapproximated:
         Parameters
         ----------
         X_new : tensor, shape (N*, D)
-        X_train : tensor, shape (N, D), optional
-            Uses stored training data if not provided.
-        y_train : tensor, shape (N,), optional
+        X_train : tensor, shape (N, D)
+        y_train : tensor, shape (N,)
         incl_lik : bool
             If True, include likelihood noise in the predictions.
 
@@ -47,10 +44,6 @@ class Unapproximated:
         mean : tensor, shape (N*,)
         var : tensor, shape (N*,)
         """
-        if X_train is None:
-            X_train = self._X_train
-            y_train = self._y_train
-
         Knn = self.kernel(X_train)
         Knn_noisy = Knn + self.likelihood.sigma**2 * pt.eye(X_train.shape[0])
         Kns = self.kernel(X_train, X_new)  # (N, N*)
