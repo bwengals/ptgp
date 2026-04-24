@@ -30,7 +30,7 @@ class VFE:
         self.likelihood = Gaussian(sigma)
         self.inducing_variable = inducing_variable
 
-    def predict_marginal(self, X_new, X_train=None, y_train=None, incl_lik=False):
+    def predict_marginal(self, X_new, X_train, y_train, incl_lik=False):
         """Posterior marginal mean and variance at each point in X_new.
 
         Returns the per-point posterior; correlations between test points
@@ -39,8 +39,8 @@ class VFE:
         Parameters
         ----------
         X_new : tensor, shape (N*, D)
-        X_train : tensor, shape (N, D), optional
-        y_train : tensor, shape (N,), optional
+        X_train : tensor, shape (N, D)
+        y_train : tensor, shape (N,)
         incl_lik : bool
             If True, include likelihood noise in the predictions.
 
@@ -49,10 +49,6 @@ class VFE:
         mean : tensor, shape (N*,)
         var : tensor, shape (N*,)
         """
-        if X_train is None:
-            X_train = self._X_train
-            y_train = self._y_train
-
         Z = self.inducing_variable.Z
         sigma2 = self.likelihood.sigma**2
 
