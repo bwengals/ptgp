@@ -1,5 +1,6 @@
 import pytensor.tensor as pt
 
+from ptgp.likelihoods import Gaussian
 from ptgp.mean import Zero
 
 
@@ -7,24 +8,26 @@ class VFE:
     """Variational Free Energy (SGPR) sparse Gaussian Process.
 
     Uses Titsias' collapsed bound — inducing variables are analytically
-    integrated out.
+    integrated out. The observation model is Gaussian; parameterize the noise
+    via ``sigma``.
 
     Parameters
     ----------
     kernel : Kernel
         Covariance function.
     mean : callable, optional
-        Mean function (default: Zero()).
-    likelihood : Gaussian
-        Gaussian likelihood (VFE requires Gaussian likelihood).
+        Mean function (default: ``Zero()``).
+    sigma : tensor or PyMC random variable
+        Observation noise standard deviation.
     inducing_variable : InducingVariables
         Inducing point locations.
     """
 
-    def __init__(self, kernel, mean=None, likelihood=None, inducing_variable=None):
+    def __init__(self, kernel, mean=None, sigma=None, inducing_variable=None):
+        """Store the kernel, mean, and inducing variable; build a Gaussian likelihood from sigma."""
         self.kernel = kernel
         self.mean = mean if mean is not None else Zero()
-        self.likelihood = likelihood
+        self.likelihood = Gaussian(sigma)
         self.inducing_variable = inducing_variable
 
     def predict_marginal(self, X_new, X_train=None, y_train=None, incl_lik=False):
