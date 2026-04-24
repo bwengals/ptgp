@@ -1,4 +1,5 @@
 from ptgp.kernels.base import Kernel
+from ptgp.kernels.categorical import LowRankCategorical, Overlap
 from ptgp.kernels.combination import ProductKernel, SumKernel
 from ptgp.kernels.nonstationary import Gibbs, RandomWalk, WarpedInput
 from ptgp.kernels.stationary import ExpQuad, Matern12, Matern32, Matern52
@@ -12,6 +13,8 @@ __all__ = [
     "Gibbs",
     "RandomWalk",
     "WarpedInput",
+    "Overlap",
+    "LowRankCategorical",
     "SumKernel",
     "ProductKernel",
 ]
