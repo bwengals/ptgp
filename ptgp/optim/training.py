@@ -85,6 +85,7 @@ def compile_training_step(
     frozen_vars=None,
     param_groups=None,
     include_prior=True,
+    compile_kwargs=None,
     **optimizer_kwargs,
 ):
     """Compile a training step function for a PTGP model with PyMC priors.
@@ -134,6 +135,10 @@ def compile_training_step(
         or entries of ``extra_vars``). Resolved to shared variables and
         forwarded to the optimizer. Required when ``learning_rate`` is a
         dict. The union of groups must cover every optimized parameter.
+    compile_kwargs : dict, optional
+        Forwarded as ``**compile_kwargs`` to ``pytensor.function``. Use this
+        to set ``mode`` (e.g. ``"NUMBA"``, ``"JAX"``), ``allow_input_downcast``,
+        etc. Same pattern as ``pm.sample``'s ``compile_kwargs``.
     **optimizer_kwargs
         Passed to the optimizer (e.g. ``learning_rate=1e-2`` or a dict
         of per-group rates).
@@ -200,10 +205,13 @@ def compile_training_step(
 
     updates = optimizer_fn(loss_replaced, all_shared, **optimizer_kwargs)
 
+    compile_kwargs = dict(compile_kwargs) if compile_kwargs else {}
+    extra_updates = compile_kwargs.pop("updates", {})
     train_step = pytensor.function(
         [X_var, y_var],
         loss_replaced,
-        updates=updates,
+        updates={**updates, **extra_updates},
+        **compile_kwargs,
     )
     return train_step, shared_params, shared_extras
 
@@ -218,6 +226,7 @@ def compile_scipy_objective(
     extra_init=None,
     frozen_vars=None,
     include_prior=True,
+    compile_kwargs=None,
 ):
     """Compile a (loss, grad) objective for ``scipy.optimize.minimize``.
 
@@ -264,6 +273,10 @@ def compile_scipy_objective(
         transform log-det-jacobian) to the objective, yielding MAP in
         the unconstrained space. Set False for MLE / pure ELBO without
         prior regularization.
+    compile_kwargs : dict, optional
+        Forwarded as ``**compile_kwargs`` to ``pytensor.function``. Use this
+        to set ``mode`` (e.g. ``"NUMBA"``, ``"JAX"``), ``allow_input_downcast``,
+        etc. Same pattern as ``pm.sample``'s ``compile_kwargs``.
 
     Returns
     -------
@@ -341,7 +354,11 @@ def compile_scipy_objective(
     loss_replaced = graph_replace(loss_rvs_replaced, replace_map, strict=False)
     flat_grad = pt.grad(loss_replaced, theta_var)
 
-    fun = pytensor.function([theta_var, X_var, y_var], [loss_replaced, flat_grad])
+    fun = pytensor.function(
+        [theta_var, X_var, y_var],
+        [loss_replaced, flat_grad],
+        **(compile_kwargs or {}),
+    )
 
     def unpack_to_shared(theta):
         """Write ``theta`` into the captured shared vars for prediction."""
@@ -392,6 +409,7 @@ def compile_predict(
     X_train=None,
     y_train=None,
     incl_lik=False,
+    compile_kwargs=None,
 ):
     """Compile a prediction function that reads trained shared parameters.
 
@@ -415,6 +433,10 @@ def compile_predict(
         Training targets (required for GP and VFE).
     incl_lik : bool
         If True, include likelihood noise in the predictions.
+    compile_kwargs : dict, optional
+        Forwarded as ``**compile_kwargs`` to ``pytensor.function``. Use this
+        to set ``mode`` (e.g. ``"NUMBA"``, ``"JAX"``), etc. Same pattern as
+        ``pm.sample``'s ``compile_kwargs``.
 
     Returns
     -------
@@ -439,4 +461,4 @@ def compile_predict(
         shared_extras,
     )
 
-    return pytensor.function([X_new_var], [mean_s, var_s])
+    return pytensor.function([X_new_var], [mean_s, var_s], **(compile_kwargs or {}))
