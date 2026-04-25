@@ -6,6 +6,7 @@ from ptgp import (
     mean,
     objectives,
     optim,
+    rewrites,  # noqa: F401  (registers PyTensor rewrites at import)
 )
 
 __all__ = [

@@ -17,7 +17,7 @@ class Gaussian(Likelihood):
     """
 
     def __init__(self, sigma):
-        self.sigma = sigma
+        self.sigma = pt.specify_assumptions(sigma, positive=True)
 
     def _log_prob(self, f, y):
         return -0.5 * (LOG2PI + pt.log(self.sigma**2) + (y - f) ** 2 / self.sigma**2)
