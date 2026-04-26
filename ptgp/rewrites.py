@@ -28,10 +28,13 @@ from pytensor.tensor.basic import (
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.solvers.general import Solve
+from pytensor.tensor.linalg.solvers.psd import cho_solve
 from pytensor.tensor.linalg.summary import SLogDet
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import register_specialize
+from pytensor.tensor.rewriting.blockwise import blockwise_of
 from pytensor.tensor.subtensor import AdvancedIncSubtensor, IncSubtensor
 
 
@@ -286,3 +289,28 @@ def slogdet_psd_to_cholesky(fgraph, node):
     )
     copy_stack_trace([sign_old, logabsdet_old], [sign_new, logabsdet_new])
     return [sign_new, logabsdet_new]
+
+
+# ---------------------------------------------------------------------------
+# MatrixInverse(PSD A) -> cho_solve(L, eye), reusing an existing Cholesky if
+# present. Avoids the redundant cubic factorisation that pt.grad(slogdet)
+# triggers via its standalone MatrixInverse cotangent.
+# ---------------------------------------------------------------------------
+
+
+@register_specialize
+@node_rewriter([blockwise_of(MatrixInverse)])
+def matrix_inverse_psd_to_cholesky(fgraph, node):
+    """MatrixInverse(A) -> cho_solve(L, eye) for PSD A, reusing an existing Cholesky(A)."""
+    [A] = node.inputs
+    if not check_assumption(fgraph, A, POSITIVE_DEFINITE):
+        return None
+
+    L = _existing_cholesky(fgraph, A)
+    if L is None:
+        L = cholesky(A, lower=True)
+
+    eye = pt.eye(A.shape[-1], dtype=A.dtype)
+    inv_A = cho_solve((L, True), eye)
+    copy_stack_trace(node.outputs[0], inv_A)
+    return [inv_A]

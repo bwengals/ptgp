@@ -19,6 +19,7 @@ from pytensor.tensor.assumptions import (
 )
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
+from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.summary import SLogDet
 
 # Install the assumption rules and rewrites under test (side-effect import).
@@ -206,3 +207,51 @@ def test_slogdet_lowering_is_numerically_correct():
     A = rng.standard_normal((6, 6))
     K_val = A @ A.T + np.eye(6)
     np.testing.assert_allclose(f(K_val), np.linalg.slogdet(K_val)[1], atol=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# MatrixInverse(PSD A) -> cho_solve(L, eye) rewrite
+# ---------------------------------------------------------------------------
+
+
+def test_matrix_inverse_of_psd_is_lowered_to_cholesky():
+    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    inv_K = pt.linalg.inv(K)
+    rewritten = rewrite_graph(inv_K, include=("fast_run",))
+    assert not _has_op(rewritten, MatrixInverse)
+    assert _has_op(rewritten, Cholesky)
+
+
+def test_matrix_inverse_without_psd_is_not_lowered():
+    K = pt.dmatrix("K")  # no PSD annotation
+    inv_K = pt.linalg.inv(K)
+    rewritten = rewrite_graph(inv_K, include=("fast_run",))
+    assert not _has_op(rewritten, Cholesky)
+    assert _has_op(rewritten, MatrixInverse)
+
+
+def test_matrix_inverse_reuses_existing_cholesky():
+    """Sibling Solve(K, b) and inv(K) should share one Cholesky factor."""
+    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    b = pt.dvector("b")
+    x = pt.linalg.solve(K, b, assume_a="pos")
+    inv_K = pt.linalg.inv(K)
+    rewritten = rewrite_graph([x, inv_K], include=("fast_run",))
+    fg = FunctionGraph(outputs=rewritten, clone=False)
+    n_chol = sum(
+        1
+        for node in fg.apply_nodes
+        if isinstance(node.op.core_op if isinstance(node.op, Blockwise) else node.op, Cholesky)
+    )
+    assert n_chol == 1, f"expected MatrixInverse to share Cholesky, got {n_chol} factorisations"
+
+
+def test_matrix_inverse_lowering_is_numerically_correct():
+    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    inv_K = pt.linalg.inv(K)
+    f = function([K.owner.inputs[0]], inv_K)
+
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((6, 6))
+    K_val = A @ A.T + np.eye(6)
+    np.testing.assert_allclose(f(K_val), np.linalg.inv(K_val), atol=1e-10)
