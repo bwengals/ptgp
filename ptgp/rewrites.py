@@ -4,9 +4,17 @@ Registered into PyTensor's global registries at import time. See REWRITES.md.
 """
 
 import pytensor.tensor as pt
+from pytensor.compile.mode import optdb
 from pytensor.graph.basic import Constant
-from pytensor.graph.rewriting.basic import copy_stack_trace, node_rewriter
-from pytensor.scalar.basic import Mul, Pow, Sqr
+from pytensor.graph.fg import FunctionGraph
+from pytensor.graph.replace import clone_replace
+from pytensor.graph.rewriting.basic import (
+    MergeOptimizer,
+    copy_stack_trace,
+    in2out,
+    node_rewriter,
+)
+from pytensor.scalar.basic import Composite, Mul, Pow, Sqr
 from pytensor.tensor.assumptions.core import (
     AssumptionKey,
     FactState,
@@ -314,3 +322,100 @@ def matrix_inverse_psd_to_cholesky(fgraph, node):
     inv_A = cho_solve((L, True), eye)
     copy_stack_trace(node.outputs[0], inv_A)
     return [inv_A]
+
+
+# ---------------------------------------------------------------------------
+# Merge sibling Elemwise(Composite) Apply nodes that consume the exact same
+# inputs but expose different output sets. FusionOptimizer's greedy convex
+# closure produces this pattern when forward and gradient consumers of a
+# shared Elemwise sub-expression sit in different fuseable contexts; the
+# duplication then propagates to downstream Cholesky / MatrixInverse Apply
+# nodes that can't be CSE'd because they end up with different
+# inplace_patterns. Has to run after FusionOptimizer (top-level position 49)
+# and before InplaceElemwiseOptimizer (top-level position 50.5). See
+# REWRITE_ANALYSIS.md §5 for the diagnosis.
+# ---------------------------------------------------------------------------
+
+
+@node_rewriter([Elemwise])
+def merge_composites_with_shared_inputs(fgraph, node):
+    """Fuse two Elemwise(Composite) Apply nodes with id-identical inputs into one multi-output Composite."""
+    if not isinstance(node.op.scalar_op, Composite):
+        return None
+    inputs = tuple(node.inputs)
+    if not inputs:
+        return None
+
+    sibling = None
+    for client, _ in fgraph.clients[inputs[0]]:
+        if client is node:
+            continue
+        if not (isinstance(client.op, Elemwise) and isinstance(client.op.scalar_op, Composite)):
+            continue
+        if tuple(client.inputs) != inputs:
+            continue
+        sibling = client
+        break
+    if sibling is None:
+        return None
+
+    ca, cb = node.op.scalar_op, sibling.op.scalar_op
+    remap = dict(zip(cb.inputs, ca.inputs))
+    cb_outs_remapped = clone_replace(list(cb.outputs), remap)
+
+    # Inner CSE so the merged Composite computes the shared sub-expression once.
+    temp_fg = FunctionGraph(
+        inputs=list(ca.inputs),
+        outputs=list(ca.outputs) + cb_outs_remapped,
+        clone=True,
+    )
+    inner_merge = MergeOptimizer()
+    inner_merge.add_requirements(temp_fg)
+    inner_merge.apply(temp_fg)
+
+    # Output-slot dedup: any two slots pointing to the same inner Variable
+    # collapse to one external slot.
+    unique_outputs, slot_remap, seen = [], {}, {}
+    for i, o in enumerate(temp_fg.outputs):
+        if id(o) in seen:
+            slot_remap[i] = seen[id(o)]
+        else:
+            slot_remap[i] = len(unique_outputs)
+            seen[id(o)] = len(unique_outputs)
+            unique_outputs.append(o)
+
+    merged = Composite(inputs=list(temp_fg.inputs), outputs=unique_outputs)
+    new_outs = Elemwise(scalar_op=merged)(*node.inputs, return_list=True)
+
+    n_a = len(node.outputs)
+    replacements = {}
+    for i, out in enumerate(node.outputs):
+        replacements[out] = new_outs[slot_remap[i]]
+    for j, out in enumerate(sibling.outputs):
+        replacements[out] = new_outs[slot_remap[n_a + j]]
+    copy_stack_trace(list(node.outputs) + list(sibling.outputs), list(replacements.values()))
+    return replacements
+
+
+# Register at top-level optdb position 49.7: after add_destroy_handler (49.5)
+# and before any inplace pass (earliest is blockwise_inplace at 50.10).
+optdb.register(
+    "merge_composites_with_shared_inputs",
+    in2out(merge_composites_with_shared_inputs, ignore_newtrees=True),
+    "fast_run",
+    position=49.7,
+)
+
+# After the Composite merge above, downstream SpecifyAssumptions / Add /
+# Cholesky / MatrixInverse Apply nodes that were previously distinct now
+# have id-identical inputs and should CSE into one Apply. Pytensor's
+# stock pipeline only runs MergeOptimizer at position 49 (before fusion),
+# so without this second pass the duplicates persist into inplace
+# optimization, which then assigns them different inplace_patterns and
+# permanently locks in the duplication.
+optdb.register(
+    "merge_after_composite_dedup",
+    MergeOptimizer(),
+    "fast_run",
+    position=49.75,
+)

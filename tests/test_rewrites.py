@@ -255,3 +255,85 @@ def test_matrix_inverse_lowering_is_numerically_correct():
     A = rng.standard_normal((6, 6))
     K_val = A @ A.T + np.eye(6)
     np.testing.assert_allclose(f(K_val), np.linalg.inv(K_val), atol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# merge_composites_with_shared_inputs (Blocker A)
+# ---------------------------------------------------------------------------
+
+
+def _gp_mll_like_joint():
+    """Build the joint forward+gradient graph for ``Unapproximated + marginal_log_likelihood``.
+
+    This is the canonical case the merge rewrite targets — it produces the
+    sibling-Composite pattern that FusionOptimizer creates when forward and
+    gradient consumers of the kernel ``exp(...)`` value sit in different
+    convex closures.
+    """
+    from ptgp.gp import Unapproximated
+    from ptgp.kernels import ExpQuad
+    from ptgp.mean import Zero
+    from ptgp.objectives import marginal_log_likelihood
+
+    X = pt.dmatrix("X")
+    y = pt.dvector("y")
+    sigma = pt.dscalar("sigma")
+    ls = pt.dscalar("ls")
+    gp = Unapproximated(kernel=ExpQuad(input_dim=1, ls=ls), mean=Zero(), sigma=sigma)
+    loss = marginal_log_likelihood(gp, X, y)
+    g_sigma, g_ls = pt.grad(loss, [sigma, ls])
+    return [sigma, ls, X, y], [loss, g_sigma, g_ls]
+
+
+def _count_in_compiled(fn, op_type):
+    return sum(
+        1
+        for n in fn.maker.fgraph.apply_nodes
+        if isinstance(n.op.core_op if isinstance(n.op, Blockwise) else n.op, op_type)
+    )
+
+
+def test_merge_composites_collapses_gp_joint_graph_to_one_cholesky():
+    """Joint forward+gradient compilation should hit the floor: exactly one Cholesky."""
+    inputs, outputs = _gp_mll_like_joint()
+    fn = function(inputs, outputs)
+    assert _count_in_compiled(fn, Cholesky) == 1
+    assert _count_in_compiled(fn, MatrixInverse) == 0
+
+
+def test_merge_composites_does_not_change_single_composite_graphs():
+    """Graphs with no sibling-Composite pattern should compile unchanged in cubic-op count."""
+    x = pt.dvector("x")
+    out = pt.exp(x) + pt.log1p(x**2)  # one Elemwise chain, one consumer
+    fn = function([x], out)
+    # There should be at most one Elemwise(Composite); definitely no Cholesky/MatrixInverse.
+    assert _count_in_compiled(fn, Cholesky) == 0
+    assert _count_in_compiled(fn, MatrixInverse) == 0
+
+
+def test_merge_composites_preserves_numerical_correctness():
+    """Joint forward+gradient values match an analytic reference and finite-difference grads."""
+    inputs, outputs = _gp_mll_like_joint()
+    fn = function(inputs, outputs)
+
+    rng = np.random.default_rng(0)
+    N = 8
+    Xv = rng.standard_normal((N, 1))
+    yv = rng.standard_normal(N)
+    sigma_v, ls_v = 0.5, 1.2
+
+    # Analytic reference for the loss (note: marginal_log_likelihood includes the 2π term)
+    sqd = (Xv[:, 0:1] - Xv[:, 0:1].T) ** 2
+    K = np.exp(-0.5 * np.maximum(sqd / ls_v**2, 0.0)) + sigma_v**2 * np.eye(N)
+    L = np.linalg.cholesky(K)
+    alpha = np.linalg.solve(K, yv)
+    ref_loss = -0.5 * (yv @ alpha + 2 * np.sum(np.log(np.diag(L))) + N * np.log(2 * np.pi))
+
+    got_loss, got_gs, got_gl = fn(sigma_v, ls_v, Xv, yv)
+    np.testing.assert_allclose(got_loss, ref_loss, atol=1e-10)
+
+    eps = 1e-6
+    gs_fd = (fn(sigma_v + eps, ls_v, Xv, yv)[0] - fn(sigma_v - eps, ls_v, Xv, yv)[0]) / (2 * eps)
+    gl_fd = (fn(sigma_v, ls_v + eps, Xv, yv)[0] - fn(sigma_v, ls_v - eps, Xv, yv)[0]) / (2 * eps)
+    np.testing.assert_allclose(got_gs, gs_fd, atol=1e-6)
+    np.testing.assert_allclose(got_gl, gl_fd, atol=1e-6)
