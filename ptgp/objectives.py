@@ -67,14 +67,21 @@ def elbo(svgp, X, y, n_data=None):
 
 
 def collapsed_elbo(vfe, X, y):
-    """VFE/SGPR collapsed ELBO (Titsias' bound).
+    """VFE/SGPR collapsed ELBO (Titsias' bound), Woodbury form.
 
-    The inducing variables are analytically integrated out, giving a
-    bound on the exact marginal likelihood.
+    Same loss as the standard formulation
+        ELBO = log N(y; m, Q + σ²I) - 1/(2σ²) * tr(Kff - Q),
+    where ``Q = Kuf.T @ inv(Kuu) @ Kuf`` is the Nystrom approximation,
+    but the N×N inverse and log-det of ``cov = σ²I + Q`` are rewritten
+    via the Woodbury identity into operations on the M×M matrix
+    ``D = σ²·Kuu + Kuf @ Kuf.T``. This is mathematically equivalent and
+    much better conditioned when N >> M (the regime sparse GPs are made
+    for) — the original N×N covariance has N - M eigenvalues clamped at
+    exactly σ², which causes catastrophic cancellation in the gradient.
 
-    ELBO = log N(y; m, Q + sigma^2 I) - 1/(2*sigma^2) * tr(K - Q)
-
-    where Q = Kuf.T @ Kuu^{-1} @ Kuf is the Nystrom approximation.
+    Identities used (B = chol(Kuu)^{-1} @ Kuf, but never materialised):
+        inv(σ²I + Q) = (I - Kuf.T @ inv(D) @ Kuf) / σ²
+        log|σ²I + Q| = (N - M) · log σ² + log|D| - log|Kuu|
 
     Parameters
     ----------
@@ -91,32 +98,29 @@ def collapsed_elbo(vfe, X, y):
     sigma2 = vfe.likelihood.sigma**2
     N = X.shape[0]
     Z = vfe.inducing_variable.Z
+    M = Z.shape[0]
 
     mu = vfe.mean(X)
     Kff_diag = vfe.kernel.diag(X)
-    Kuf = vfe.kernel(Z, X)  # (M, N)
-    Kuu = vfe.kernel(Z)  # (M, M)
+    Kuf = vfe.kernel(Z, X)            # M × N
+    Kuu = vfe.kernel(Z)               # M × M
 
-    Kuu_inv = pt.linalg.inv(Kuu)
+    # Q_diag = diag(Kuf.T @ inv(Kuu) @ Kuf) for the trace penalty.
+    Kuu_inv_Kuf = pt.linalg.inv(Kuu) @ Kuf
+    Q_diag = pt.sum(Kuf * Kuu_inv_Kuf, axis=0)
 
-    # Nystrom approximation Q = Kuf.T @ Kuu^{-1} @ Kuf
-    # Q_diag = diag(Kuf.T @ Kuu^{-1} @ Kuf)
-    A = Kuu_inv @ Kuf  # (M, N)
-    Q_diag = pt.sum(A * Kuf, axis=0)  # (N,)
-
-    # Effective covariance: Q + sigma^2 I
-    # For the log-likelihood term, we need log N(y; mu, Q + sigma^2 I)
-    Q_mat = Kuf.T @ A  # (N, N)
-    cov = Q_mat + sigma2 * pt.eye(N)
+    # Woodbury: invert only the M × M matrix D, never the N × N cov.
+    D = sigma2 * Kuu + Kuf @ Kuf.T    # PSD by Gram construction
+    D = pt.specify_assumptions(D, positive_definite=True, symmetric=True)
 
     diff = y - mu
-    sign, logdet = pt.linalg.slogdet(cov)
-    cov_inv = pt.linalg.inv(cov)
+    Kuf_diff = Kuf @ diff
+    quad = (diff @ diff - Kuf_diff @ pt.linalg.inv(D) @ Kuf_diff) / sigma2
 
-    # log N(y; mu, Q + sigma^2 I)
-    fit = -0.5 * (diff @ cov_inv @ diff + logdet + N * pt.log(2.0 * pt.pi))
+    _, logdet_D = pt.linalg.slogdet(D)
+    _, logdet_Kuu = pt.linalg.slogdet(Kuu)
+    logdet_cov = (N - M) * pt.log(sigma2) + logdet_D - logdet_Kuu
 
-    # Trace penalty: -1/(2*sigma^2) * tr(Kff - Q)
+    fit = -0.5 * (quad + logdet_cov + N * pt.log(2.0 * pt.pi))
     trace_penalty = -0.5 / sigma2 * pt.sum(Kff_diag - Q_diag)
-
     return fit + trace_penalty
