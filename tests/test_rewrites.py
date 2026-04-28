@@ -301,6 +301,69 @@ def test_diag_of_AAT_is_numerically_correct():
     np.testing.assert_allclose(f(A_val), np.diag(A_val @ A_val.T), atol=1e-12)
 
 
+def test_diag_of_ATA_lowers_to_column_norms():
+    """``ExtractDiag(A.T @ A)`` lowers to ``sum(A**2, axis=-2)`` — no ExtractDiag, no Dot."""
+    A = pt.dmatrix("A")
+    out = pt.diagonal(A.T @ A)
+    rewritten = rewrite_graph(out, include=("fast_run",))
+    assert not _has_op(rewritten, ExtractDiag)
+
+
+def test_diag_of_ATA_is_numerically_correct():
+    A = pt.dmatrix("A")
+    out = pt.diagonal(A.T @ A)
+    f = function([A], out)
+
+    rng = np.random.default_rng(0)
+    A_val = rng.standard_normal((6, 4))   # gives diag of (4, 4)
+    np.testing.assert_allclose(f(A_val), np.diag(A_val.T @ A_val), atol=1e-12)
+
+
+def test_slogdet_of_LTL_takes_diag_shortcut_when_L_lower_triangular():
+    """``SLogDet(L.T @ L)`` lowers via the diagonal shortcut — same as L @ L.T."""
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    _, logdet = pt.linalg.slogdet(L.T @ L)
+    rewritten = rewrite_graph(logdet, include=("fast_run",))
+    assert not _has_op(rewritten, SLogDet)
+    assert not _has_op(rewritten, Cholesky)
+
+
+def test_slogdet_of_LTL_is_numerically_correct():
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    _, logdet = pt.linalg.slogdet(L.T @ L)
+    f = function([L.owner.inputs[0]], logdet)
+
+    rng = np.random.default_rng(0)
+    M = 5
+    L_val = np.tril(rng.standard_normal((M, M)))
+    L_val[np.arange(M), np.arange(M)] = np.abs(L_val[np.arange(M), np.arange(M)]) + 0.5
+    expected = float(np.linalg.slogdet(L_val.T @ L_val)[1])
+    np.testing.assert_allclose(f(L_val), expected, atol=1e-12)
+
+
+def test_matrix_inverse_of_LTL_uses_solve_triangular():
+    """``MatrixInverse(L.T @ L)`` lowers to two solve_triangular calls — no fresh Cholesky."""
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    inv_M = pt.linalg.inv(L.T @ L)
+    rewritten = rewrite_graph(inv_M, include=("fast_run",))
+    # No MatrixInverse, no Cholesky (L is reused via solve_triangular).
+    assert not _has_op(rewritten, MatrixInverse)
+    assert not _has_op(rewritten, Cholesky)
+
+
+def test_matrix_inverse_of_LTL_is_numerically_correct():
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    inv_M = pt.linalg.inv(L.T @ L)
+    f = function([L.owner.inputs[0]], inv_M)
+
+    rng = np.random.default_rng(0)
+    M = 5
+    L_val = np.tril(rng.standard_normal((M, M)))
+    L_val[np.arange(M), np.arange(M)] = np.abs(L_val[np.arange(M), np.arange(M)]) + 0.5
+    expected = np.linalg.inv(L_val.T @ L_val)
+    np.testing.assert_allclose(f(L_val), expected, atol=1e-10)
+
+
 # ---------------------------------------------------------------------------
 # MatrixInverse(PSD A) -> cho_solve(L, eye) rewrite
 # ---------------------------------------------------------------------------
