@@ -41,6 +41,12 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 
 ## Environment
 
-- Conda env: `ptgp` (Python 3.14, at `/Users/bill/miniconda3/envs/ptgp`)
+- **All code and notebooks run on the `ptgp` conda env** (Python 3.14, at `/Users/bill/miniconda3/envs/ptgp`). Never use the system python or a different env — pinned versions and the custom PyTensor branch live only here.
 - Run tests: `/Users/bill/miniconda3/envs/ptgp/bin/python -m pytest tests/`
+- Run a script: `/Users/bill/miniconda3/envs/ptgp/bin/python <script>`
+- Execute a notebook in place: `/Users/bill/miniconda3/envs/ptgp/bin/python -m jupyter nbconvert --to notebook --execute --inplace <path> --ExecutePreprocessor.kernel_name=ptgp` (the `ptgp` kernel is registered globally and points at this env)
 - PyTensor is installed from the `assumption-system` branch (PR #2032) which provides `pt.specify_assumptions`
+
+## Commits
+
+Prefer one-sentence commit messages for smaller and simpler changes. Use a one-sentence subject + multi-line body only for more complex changes that genuinely warrant explanation (multi-file refactors, non-obvious design decisions, behavior changes that need context).
