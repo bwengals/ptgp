@@ -118,8 +118,9 @@ def init_variational_params(M, q_mu_init=None, q_sqrt_init=None):
     else:
         q_sqrt_init = np.asarray(q_sqrt_init, dtype=np.float64)
 
-    q_mu = pt.vector("q_mu", dtype="float64")
-    q_sqrt_flat = pt.vector("q_sqrt_flat", dtype="float64")
+    n_lower = M * (M + 1) // 2
+    q_mu = pt.vector("q_mu", shape=(M,), dtype="float64")
+    q_sqrt_flat = pt.vector("q_sqrt_flat", shape=(n_lower,), dtype="float64")
     q_sqrt = pt.specify_assumptions(
         _softplus_lower_triangular(q_sqrt_flat, M),
         lower_triangular=True,
