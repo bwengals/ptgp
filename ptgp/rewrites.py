@@ -38,7 +38,7 @@ from pytensor.tensor.elemwise import DimShuffle, Elemwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.solvers.general import Solve
-from pytensor.tensor.linalg.solvers.psd import cho_solve
+from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
 from pytensor.tensor.linalg.summary import SLogDet
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import register_specialize
@@ -196,9 +196,28 @@ def _solve_core_op(var):
     return core if isinstance(core, Solve) else None
 
 
+def _cholesky_solve_core_op(var):
+    """Return the core ``CholeskySolve`` op if ``var`` is one, else None."""
+    owner = var.owner
+    if owner is None:
+        return None
+    op = owner.op
+    core = op.core_op if isinstance(op, Blockwise) else op
+    return core if isinstance(core, CholeskySolve) else None
+
+
+def _is_cholesky_factor(L):
+    """True if ``L`` is the output of a ``Cholesky`` Apply (so factored a PSD matrix by construction)."""
+    if L.owner is None:
+        return False
+    op = L.owner.op
+    core = op.core_op if isinstance(op, Blockwise) else op
+    return isinstance(core, Cholesky)
+
+
 @register_assumption(POSITIVE_DEFINITE, Dot)
 def _dot_quadratic_form_psd(op, feature, fgraph, node, input_states):
-    """``X.T @ M @ X`` and ``X.T @ Solve(M, X)`` are PSD when ``M`` is PSD."""
+    """``X.T @ M @ X``, ``X.T @ Solve(M, X)``, and ``X.T @ CholeskySolve(L, X)`` are PSD."""
     a, b = node.inputs
     X = _matrix_transpose_of(a)
     if X is None:
@@ -208,10 +227,15 @@ def _dot_quadratic_form_psd(op, feature, fgraph, node, input_states):
         M, X2 = b.owner.inputs
         if X2 is X and feature.check(M, POSITIVE_DEFINITE):
             return [FactState.TRUE]
-    # Solve canonical form: X.T @ Solve(M, X) ≡ X.T @ M^{-1} @ X
+    # Solve canonical form: X.T @ Solve(M, X) ≡ X.T @ M^{-1} @ X (M PSD)
     if _solve_core_op(b) is not None:
         M, X2 = b.owner.inputs
         if X2 is X and feature.check(M, POSITIVE_DEFINITE):
+            return [FactState.TRUE]
+    # CholeskySolve form: X.T @ CholeskySolve(L, X) ≡ X.T @ M^{-1} @ X where M = L @ L.T (PSD by construction)
+    if _cholesky_solve_core_op(b) is not None:
+        L, X2 = b.owner.inputs
+        if X2 is X and _is_cholesky_factor(L):
             return [FactState.TRUE]
     return [FactState.UNKNOWN]
 

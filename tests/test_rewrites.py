@@ -140,6 +140,16 @@ def test_quadratic_form_with_solve_is_psd():
     assert af.check(Q, POSITIVE_DEFINITE)
 
 
+def test_quadratic_form_with_cholesky_solve_is_psd():
+    """X.T @ M^{-1} @ X (written as CholeskySolve) is PSD when L = Cholesky(M)."""
+    X = pt.dmatrix("X")
+    M = pt.specify_assumptions(pt.dmatrix("M"), positive_definite=True, symmetric=True)
+    L = cholesky(M, lower=True)
+    Q = X.T.dot(pt.linalg.cho_solve((L, True), X))
+    _, af = make_fgraph(Q, inputs=[X, M.owner.inputs[0]])
+    assert af.check(Q, POSITIVE_DEFINITE)
+
+
 def test_set_subtensor_of_zeros_with_positive_diagonal_is_psd():
     """``zeros(N, N)[arange(N), arange(N)] = positive_vec`` is PSD."""
     n = pt.lscalar("n")
