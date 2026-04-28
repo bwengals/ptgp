@@ -16,7 +16,7 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 
 - **No PyMC inference**: Never use `pm.sample()`, `pm.find_MAP()`, or any PyMC inference routine. `pm.Model()` is only a prior container.
 - **Naive linear algebra**: Write `pt.linalg.inv(K)`, `pt.linalg.slogdet(K)` directly. Do not manually write Cholesky + solve_triangular chains. Let PyTensor's rewrite system choose algorithms.
-- **Kernel annotations**: When a kernel evaluates `K(X, X)`, annotate with `pt.specify_assumptions(K, symmetric=True, positive_definite=True)`. Cross-covariance `K(X, Y)` gets no annotation.
+- **Kernel annotations**: When a kernel evaluates `K(X, X)`, annotate with `pt.assume(K, symmetric=True, positive_definite=True)`. Cross-covariance `K(X, Y)` gets no annotation. (`pt.assume` is the public-facing name; ptgp patches it locally to also accept `positive=True` for scalar-positivity assumptions until upstream picks that up.)
 - **Symbolic outputs**: All kernel, likelihood, and model methods return symbolic PyTensor tensors, not eagerly evaluated results.
 - **Native kernels**: Kernels are implemented in PTGP, not reused from PyMC.
 
@@ -45,7 +45,7 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 - Run tests: `/Users/bill/miniconda3/envs/ptgp/bin/python -m pytest tests/`
 - Run a script: `/Users/bill/miniconda3/envs/ptgp/bin/python <script>`
 - Execute a notebook in place: `/Users/bill/miniconda3/envs/ptgp/bin/python -m jupyter nbconvert --to notebook --execute --inplace <path> --ExecutePreprocessor.kernel_name=ptgp` (the `ptgp` kernel is registered globally and points at this env)
-- PyTensor is installed from the `assumption-system` branch (PR #2032) which provides `pt.specify_assumptions`
+- PyTensor is installed from the `assumption-system` branch (PR #2032) which provides `pt.assume` and the assumption-tag system.
 
 ## Commits
 

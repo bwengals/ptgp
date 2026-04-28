@@ -4,10 +4,10 @@ A practical GP library for advanced users who need modeling flexibility, built o
 
 ## Stack
 
-- **PyTensor**: symbolic computation, graph rewrites, kernel matrix structure annotations (using PR #2032 `assumption-system` branch)
+- **PyTensor**: symbolic computation, graph rewrites, kernel matrix structure annotations (using PR #2032 `assumption-system` branch — `pt.assume` is the public-facing annotation API)
 - **PyMC**: `pm.Model()` as prior container only — no PyMC samplers or inference routines
-- **JAX + Optax**: JIT compilation and optimization via `get_jaxified_graph` (in `ptgp/inference/`)
-- **Native PyTensor optimizers**: Adam/SGD via `pytensor.shared` variables (in `ptgp/optim/`) — no JAX dependency required
+- **Native PyTensor optimizers**: Adam/SGD via `pytensor.shared` variables (in `ptgp/optim/`) — no JAX dependency required for training
+- **scipy.optimize**: L-BFGS-B for batch (non-stochastic) training via `compile_scipy_objective`
 - **Kernels**: implemented natively in PTGP; long-term goal is for PyMC to depend on PTGP for kernels
 
 ## Models
@@ -24,9 +24,9 @@ All three are user facing. SVGP is the primary model for large datasets. VFE for
 
 - `pm.Model()` is used **only** as a container for the prior graph
 - `model.logp()` gives a symbolic PyTensor prior log-prob expression
-- Two optimization paths:
-  - **JAX-based** (`ptgp/inference/`): L-BFGS-B or Optax SGD via JAX compilation
-  - **Native PyTensor** (`ptgp/optim/`): Adam/SGD using `pytensor.shared` variables — prediction automatically uses trained parameters
+- Two optimization paths in `ptgp/optim/`:
+  - **`compile_training_step`**: Adam / SGD via `pytensor.shared` variables — for stochastic / minibatch training (SVGP). Prediction reads the same shared variables.
+  - **`compile_scipy_objective`**: returns `(loss, grad)` callable for `scipy.optimize.minimize` — for full-batch training (Unapproximated, VFE).
 - Kernel and likelihood hyperparameters are PyMC RVs defined in `pm.Model` context
 - **Priors regularize training by default.** `compile_training_step` and `compile_scipy_objective` both add `model.logp(jacobian=True, sum=True)` to the loss, yielding MAP in the unconstrained (value-var) space. Set `include_prior=False` for MLE / pure ELBO without prior regularization.
 
@@ -37,7 +37,7 @@ The canonical, maintained usage examples live in [`notebooks/demo.ipynb`](notebo
 Kernels evaluate on **matrix pairs**, returning annotated PyTensor tensors (not GPJax's scalar-pair-with-vmap approach).
 
 - `__call__(X, Y=None)` returns a PyTensor tensor
-- `K(X, X)` annotated as `symmetric=True`, `positive_definite=True` via `pt.specify_assumptions`
+- `K(X, X)` annotated as `symmetric=True`, `positive_definite=True` via `pt.assume`
 - `K(X, Y)` returned unannotated
 - Composition via `+` and `*` operators (`SumKernel`, `ProductKernel`)
 - `active_dims` for selecting input dimensions
@@ -50,7 +50,7 @@ Standalone functions, not methods on model classes (follows GPJax's pattern):
 
 - `marginal_log_likelihood(gp, X, y)` — exact GP
 - `elbo(svgp, X_batch, y_batch)` — SVGP (scales by `n_data / batch_size`)
-- `collapsed_elbo(vfe, X, y)` — VFE/SGPR (Titsias' bound)
+- `collapsed_elbo(vfe, X, y)` — VFE/SGPR (Titsias' bound), Woodbury-form so the inverse and log-det operate on an M×M matrix instead of N×N (numerically much better-conditioned when N ≫ M, which is the regime sparse GPs are made for)
 
 Each objective is 1:1 with a model class and cannot be used interchangeably. They are standalone functions rather than methods because `compile_training_step` takes the objective as a first-class callable with a uniform `(model, X, y)` signature. This makes composition straightforward — e.g. wrapping the ELBO with minibatch scaling:
 
@@ -94,9 +94,21 @@ Native PyTensor training without JAX. Uses `pytensor.shared` variables so that t
   - Optimizer updates are passed to `pytensor.function(..., updates=...)` so calling the function updates parameters in-place
   - `compile_predict()` builds a prediction function using the same shared variables — no model reconstruction needed
 
-### SVGP extra variables
+### SVGP variational parameters
 
-For SVGP, variational parameters (`q_mu`, `q_sqrt`) are not PyMC RVs. Pass them as `extra_vars` with `extra_init` to `compile_training_step`. They get their own shared variables and are optimized alongside the PyMC parameters.
+SVGP's variational parameters (`q_mu`, `q_sqrt`) are not PyMC RVs — they need their own symbolic placeholders with backing storage. Construct them via `init_variational_params(M)`, which returns a `VariationalParams` dataclass:
+
+```python
+vp = pg.gp.init_variational_params(M)
+svgp = pg.gp.SVGP(..., variational_params=vp)
+train_step, ... = pg.optim.compile_training_step(
+    elbo, svgp, X, y, model=model,
+    extra_vars=vp.extra_vars,    # the underlying flat-vector leaves
+    extra_init=vp.extra_init,    # their initial values
+)
+```
+
+`q_sqrt` is stored internally as a flat vector of length M·(M+1)/2 with softplus on the diagonal (GPJax-style parameterisation), guaranteeing it stays a true Cholesky factor (lower-triangular with strictly positive diagonal) at every optimizer step. The `extra_vars` mechanism in `compile_training_step` accepts arbitrary additional symbolic variables to optimize alongside the PyMC parameters; SVGP plugs into it via the `vp.extra_vars` / `vp.extra_init` lists.
 
 ## Prediction
 
@@ -124,6 +136,8 @@ Write GP math directly and simply. PyTensor's rewrite system selects efficient i
 - Declare structure via annotations, let the compiler choose algorithms
 
 This is fundamentally different from GPyTorch/CoLA/linear_operator which choose algorithms at runtime.
+
+**Status.** All three models compile their full forward+gradient training step down to the cubic-factorisation floor — `Unapproximated` = 1 Cholesky/step, `VFE` = 2, `SVGP` = 1. Pinned by `tests/test_cubic_floor.py`; `scripts/joint_graph_analysis.py` prints the per-op breakdown and `scripts/inplace_audit.py` reports inplace status for each cubic op. See `REWRITE_ANALYSIS.md` for the full diagnosis of how the rewrites cooperate to reach the floor.
 
 ## LinearOperator (`ptgp/linalg/`)
 
