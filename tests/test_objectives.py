@@ -5,7 +5,7 @@ import pytensor
 import pytensor.tensor as pt
 import pytest
 
-from ptgp.gp import SVGP, VFE, Unapproximated
+from ptgp.gp import SVGP, VFE, Unapproximated, VariationalParams, init_variational_params
 from ptgp.inducing import Points
 from ptgp.kernels import ExpQuad
 from ptgp.likelihoods import Gaussian
@@ -55,6 +55,12 @@ class TestMarginalLogLikelihood:
 
 
 class TestELBO:
+    def _identity_vp(self, M):
+        return VariationalParams(
+            q_mu=pt.zeros(M),
+            q_sqrt=pt.specify_assumptions(pt.eye(M), lower_triangular=True),
+        )
+
     def test_finite(self, regression_data, inducing_points):
         X, y = regression_data
         svgp = SVGP(
@@ -62,6 +68,7 @@ class TestELBO:
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
+            variational_params=self._identity_vp(5),
         )
         elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
         assert np.isfinite(elbo_val)
@@ -73,6 +80,7 @@ class TestELBO:
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
+            variational_params=self._identity_vp(5),
             whiten=False,
         )
         elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
@@ -91,6 +99,7 @@ class TestELBO:
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
             inducing_variable=Points(Z),
+            variational_params=self._identity_vp(5),
             whiten=True,
         )
         elbo_w = _eval(elbo(svgp_w, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
@@ -98,14 +107,17 @@ class TestELBO:
         # Unwhitened: q_mu=0, q_sqrt=Luu is the prior q(u)=N(0, Kuu)
         Kuu = _eval(kernel(Z))
         Luu = np.linalg.cholesky(Kuu)
+        vp_u = VariationalParams(
+            q_mu=pt.zeros(5),
+            q_sqrt=pt.specify_assumptions(pt.as_tensor_variable(Luu), lower_triangular=True),
+        )
         svgp_u = SVGP(
             kernel=kernel,
             mean=Zero(),
             likelihood=Gaussian(sigma=0.1),
             inducing_variable=Points(Z),
+            variational_params=vp_u,
             whiten=False,
-            q_mu=pt.zeros(5),
-            q_sqrt=pt.as_tensor_variable(Luu),
         )
         elbo_u = _eval(elbo(svgp_u, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 
@@ -127,6 +139,7 @@ class TestELBO:
             mean=Zero(),
             likelihood=Gaussian(sigma=sigma),
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
+            variational_params=self._identity_vp(5),
         )
         elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 

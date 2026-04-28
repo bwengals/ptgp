@@ -112,8 +112,7 @@ def test_compile_training_step_svgp(svgp_data):
     Z_init = rng.choice(X[:, 0], M, replace=False)
     Z_init = np.sort(Z_init)[:, None]
 
-    q_mu_var = pt.vector("q_mu")
-    q_sqrt_var = pt.matrix("q_sqrt")
+    vp = pg.gp.init_variational_params(M)
 
     with pm.Model() as model:
         ls = pm.InverseGamma("ls", alpha=2.0, beta=1.0)
@@ -124,8 +123,7 @@ def test_compile_training_step_svgp(svgp_data):
             kernel=kernel,
             likelihood=pg.likelihoods.Gaussian(sigma=0.1),
             inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z_init)),
-            q_mu=q_mu_var,
-            q_sqrt=q_sqrt_var,
+            variational_params=vp,
         )
 
     X_var = pt.matrix("X")
@@ -137,8 +135,8 @@ def test_compile_training_step_svgp(svgp_data):
         X_var,
         y_var,
         model=model,
-        extra_vars=[q_mu_var, q_sqrt_var],
-        extra_init=[np.zeros(M), np.eye(M)],
+        extra_vars=vp.extra_vars,
+        extra_init=vp.extra_init,
         learning_rate=1e-2,
     )
 

@@ -47,9 +47,8 @@ class TestSVGPBernoulliSmoke:
         X, y = _binary_data(rng, n=120)
         M = 12
 
-        q_mu_var = pt.vector("q_mu")
-        q_sqrt_var = pt.matrix("q_sqrt")
         Z_init = np.linspace(-3, 3, M)[:, None]
+        vp = pg.gp.init_variational_params(M)
 
         with pm.Model() as model:
             ls = pm.InverseGamma("ls", alpha=2.0, beta=1.0)
@@ -59,8 +58,7 @@ class TestSVGPBernoulliSmoke:
                 kernel=kernel,
                 likelihood=pg.likelihoods.Bernoulli(),
                 inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z_init)),
-                q_mu=q_mu_var,
-                q_sqrt=q_sqrt_var,
+                variational_params=vp,
             )
 
         X_var = pt.matrix("X")
@@ -72,8 +70,8 @@ class TestSVGPBernoulliSmoke:
             X_var,
             y_var,
             model=model,
-            extra_vars=[q_mu_var, q_sqrt_var],
-            extra_init=[np.zeros(M), np.eye(M)],
+            extra_vars=vp.extra_vars,
+            extra_init=vp.extra_init,
             learning_rate=5e-2,
         )
 
@@ -86,7 +84,7 @@ class TestSVGPBernoulliSmoke:
             X_new_var,
             model,
             shared_params,
-            extra_vars=[q_mu_var, q_sqrt_var],
+            extra_vars=vp.extra_vars,
             shared_extras=shared_extras,
             incl_lik=True,
         )
@@ -118,22 +116,21 @@ class TestSVGPBernoulliElboMatchesGPJax:
         """Evaluate PTGP whitened-SVGP ELBO at the fixed configuration."""
         ls = pt.scalar("ls")
         eta = pt.scalar("eta")
-        q_mu = pt.vector("q_mu")
-        q_sqrt = pt.matrix("q_sqrt")
+        M = q_mu_val.shape[0]
+        vp = pg.gp.init_variational_params(M, q_mu_init=q_mu_val, q_sqrt_init=q_sqrt_val)
         kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
         svgp = pg.gp.SVGP(
             kernel=kernel,
             likelihood=pg.likelihoods.Bernoulli(),
             inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z)),
-            q_mu=q_mu,
-            q_sqrt=q_sqrt,
+            variational_params=vp,
             whiten=True,
         )
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
         elbo_expr = pg.objectives.elbo(svgp, X_var, y_var)
-        fn = pytensor.function([X_var, y_var, q_mu, q_sqrt, ls, eta], elbo_expr)
-        return float(fn(X, y, q_mu_val, q_sqrt_val, ls_val, eta_val))
+        fn = pytensor.function([X_var, y_var, *vp.extra_vars, ls, eta], elbo_expr)
+        return float(fn(X, y, *vp.extra_init, ls_val, eta_val))
 
     def _gpjax_elbo(self, X, y, Z, q_mu_val, q_sqrt_val, ls_val, eta_val):
         """Evaluate GPJax whitened-SVGP ELBO at the same configuration."""
@@ -189,9 +186,8 @@ class TestSVGPPoissonSmoke:
         X, y = _count_data(rng, n=120)
         M = 12
 
-        q_mu_var = pt.vector("q_mu")
-        q_sqrt_var = pt.matrix("q_sqrt")
         Z_init = np.linspace(-2, 2, M)[:, None]
+        vp = pg.gp.init_variational_params(M)
 
         with pm.Model() as model:
             ls = pm.InverseGamma("ls", alpha=2.0, beta=1.0)
@@ -201,8 +197,7 @@ class TestSVGPPoissonSmoke:
                 kernel=kernel,
                 likelihood=pg.likelihoods.Poisson(),
                 inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z_init)),
-                q_mu=q_mu_var,
-                q_sqrt=q_sqrt_var,
+                variational_params=vp,
             )
 
         X_var = pt.matrix("X")
@@ -214,8 +209,8 @@ class TestSVGPPoissonSmoke:
             X_var,
             y_var,
             model=model,
-            extra_vars=[q_mu_var, q_sqrt_var],
-            extra_init=[np.zeros(M), np.eye(M)],
+            extra_vars=vp.extra_vars,
+            extra_init=vp.extra_init,
             learning_rate=5e-2,
         )
 
@@ -228,7 +223,7 @@ class TestSVGPPoissonSmoke:
             X_new_var,
             model,
             shared_params,
-            extra_vars=[q_mu_var, q_sqrt_var],
+            extra_vars=vp.extra_vars,
             shared_extras=shared_extras,
             incl_lik=True,
         )
@@ -260,22 +255,21 @@ class TestSVGPPoissonElboMatchesGPJax:
         """Evaluate PTGP whitened-SVGP ELBO at the fixed configuration."""
         ls = pt.scalar("ls")
         eta = pt.scalar("eta")
-        q_mu = pt.vector("q_mu")
-        q_sqrt = pt.matrix("q_sqrt")
+        M = q_mu_val.shape[0]
+        vp = pg.gp.init_variational_params(M, q_mu_init=q_mu_val, q_sqrt_init=q_sqrt_val)
         kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
         svgp = pg.gp.SVGP(
             kernel=kernel,
             likelihood=pg.likelihoods.Poisson(),
             inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z)),
-            q_mu=q_mu,
-            q_sqrt=q_sqrt,
+            variational_params=vp,
             whiten=True,
         )
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
         elbo_expr = pg.objectives.elbo(svgp, X_var, y_var)
-        fn = pytensor.function([X_var, y_var, q_mu, q_sqrt, ls, eta], elbo_expr)
-        return float(fn(X, y, q_mu_val, q_sqrt_val, ls_val, eta_val))
+        fn = pytensor.function([X_var, y_var, *vp.extra_vars, ls, eta], elbo_expr)
+        return float(fn(X, y, *vp.extra_init, ls_val, eta_val))
 
     def _gpjax_elbo(self, X, y, Z, q_mu_val, q_sqrt_val, ls_val, eta_val):
         """Evaluate GPJax whitened-SVGP ELBO at the same configuration."""

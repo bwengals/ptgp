@@ -18,6 +18,9 @@ def _build_svgp(ls_val=1.3, eta_val=0.9, M=8, whiten=True):
     """Build a fixed SVGP with concrete (non-symbolic) hyperparameters.
 
     Returns the model plus compiled functions for the three predict paths.
+    The compiled functions take (q_mu, q_sqrt_flat) — to evaluate at a
+    specific (q_mu_val, L), use ``pg.gp.init_variational_params(M, q_mu_init=q_mu_val,
+    q_sqrt_init=L).extra_init`` to obtain the matching flat-vec inputs.
     """
     Z = np.linspace(-2, 2, M)[:, None]
     rng = np.random.default_rng(0)
@@ -25,16 +28,14 @@ def _build_svgp(ls_val=1.3, eta_val=0.9, M=8, whiten=True):
     L = np.tril(rng.normal(0, 0.2, (M, M)))
     L[np.arange(M), np.arange(M)] = np.abs(L[np.arange(M), np.arange(M)]) + 0.5
 
-    q_mu = pt.vector("q_mu")
-    q_sqrt = pt.matrix("q_sqrt")
+    vp = pg.gp.init_variational_params(M)
     with pm.Model():
         kernel = eta_val**2 * pg.kernels.Matern52(input_dim=1, ls=ls_val)
         svgp = pg.gp.SVGP(
             kernel=kernel,
             likelihood=pg.likelihoods.Bernoulli(),
             inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z)),
-            q_mu=q_mu,
-            q_sqrt=q_sqrt,
+            variational_params=vp,
             whiten=whiten,
         )
 
@@ -45,11 +46,16 @@ def _build_svgp(ls_val=1.3, eta_val=0.9, M=8, whiten=True):
     mean_j, cov_j = svgp.predict_joint(X_var)
     samples = svgp.predict_f_samples(X_var, eps_var)
 
-    marginal_fn = pytensor.function([X_var, q_mu, q_sqrt], [mean_m, var_m])
-    joint_fn = pytensor.function([X_var, q_mu, q_sqrt], [mean_j, cov_j])
-    samples_fn = pytensor.function([X_var, eps_var, q_mu, q_sqrt], samples)
+    marginal_fn = pytensor.function([X_var, *vp.extra_vars], [mean_m, var_m])
+    joint_fn = pytensor.function([X_var, *vp.extra_vars], [mean_j, cov_j])
+    samples_fn = pytensor.function([X_var, eps_var, *vp.extra_vars], samples)
 
-    return q_mu_val, L, marginal_fn, joint_fn, samples_fn
+    return q_mu_val, L, marginal_fn, joint_fn, samples_fn, M
+
+
+def _to_flat(L, M):
+    """Convert a lower-tri M×M Cholesky factor to its softplus-flat-vec representation."""
+    return pg.gp.init_variational_params(M, q_sqrt_init=L).extra_init[1]
 
 
 class TestPredictJointConsistency:
@@ -62,10 +68,11 @@ class TestPredictJointConsistency:
     def test_mean_and_marginal_var_agree(self):
         """Mean matches; diag of joint cov matches marginal var."""
         X = np.linspace(-2.5, 2.5, 20)[:, None]
-        q_mu_val, L, marginal_fn, joint_fn, _ = _build_svgp()
+        q_mu_val, L, marginal_fn, joint_fn, _, M = _build_svgp()
+        flat_L = _to_flat(L, M)
 
-        mean_m, var_m = marginal_fn(X, q_mu_val, L)
-        mean_j, cov_j = joint_fn(X, q_mu_val, L)
+        mean_m, var_m = marginal_fn(X, q_mu_val, flat_L)
+        mean_j, cov_j = joint_fn(X, q_mu_val, flat_L)
 
         np.testing.assert_allclose(mean_m, mean_j, atol=1e-10)
         np.testing.assert_allclose(var_m, np.diag(cov_j), atol=1e-10)
@@ -76,14 +83,15 @@ class TestPredictJointConsistency:
         Regression guard for the two-branch logic in ``base_conditional``."""
         X = np.linspace(-2.5, 2.5, 15)[:, None]
         # Whitened path
-        q_mu_val, L, _, joint_w, _ = _build_svgp(whiten=True)
-        mean_w, cov_w = joint_w(X, q_mu_val, L)
+        q_mu_val, L, _, joint_w, _, M = _build_svgp(whiten=True)
+        flat_L = _to_flat(L, M)
+        mean_w, cov_w = joint_w(X, q_mu_val, flat_L)
         # Unwhitened — use the same q_mu and q_sqrt values; the posteriors
         # won't be literally equal, but the joint cov diagonal must agree
         # with its own marginal. We check internal consistency only.
-        _, _, marginal_u, joint_u, _ = _build_svgp(whiten=False)
-        mean_u_m, var_u_m = marginal_u(X, q_mu_val, L)
-        mean_u_j, cov_u_j = joint_u(X, q_mu_val, L)
+        _, _, marginal_u, joint_u, _, M = _build_svgp(whiten=False)
+        mean_u_m, var_u_m = marginal_u(X, q_mu_val, flat_L)
+        mean_u_j, cov_u_j = joint_u(X, q_mu_val, flat_L)
         np.testing.assert_allclose(mean_u_m, mean_u_j, atol=1e-10)
         np.testing.assert_allclose(var_u_m, np.diag(cov_u_j), atol=1e-10)
 
@@ -99,14 +107,15 @@ class TestPredictFSamplesMonteCarlo:
         """With S=20000 samples, empirical moments match analytical
         within coarse Monte Carlo tolerance."""
         X = np.linspace(-2.0, 2.0, 10)[:, None]
-        q_mu_val, L, _, joint_fn, samples_fn = _build_svgp()
+        q_mu_val, L, _, joint_fn, samples_fn, M = _build_svgp()
+        flat_L = _to_flat(L, M)
 
-        mean_an, cov_an = joint_fn(X, q_mu_val, L)
+        mean_an, cov_an = joint_fn(X, q_mu_val, flat_L)
 
         S = 20000
         rng = np.random.default_rng(42)
         epsilon = rng.standard_normal((S, X.shape[0]))
-        samples = samples_fn(X, epsilon, q_mu_val, L)
+        samples = samples_fn(X, epsilon, q_mu_val, flat_L)
         assert samples.shape == (S, X.shape[0])
 
         sample_mean = samples.mean(axis=0)

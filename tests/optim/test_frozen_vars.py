@@ -10,9 +10,7 @@ import ptgp as pg
 
 def _make_svgp(Z_placeholder, M):
     """Build a tiny SVGP model using Z_placeholder as the inducing variable."""
-    q_mu_var = pt.vector("q_mu")
-    q_sqrt_var = pt.matrix("q_sqrt")
-
+    vp = pg.gp.init_variational_params(M)
     with pm.Model() as model:
         ls = pm.InverseGamma("ls", alpha=2.0, beta=1.0)
         eta = pm.Exponential("eta", lam=1.0)
@@ -21,10 +19,9 @@ def _make_svgp(Z_placeholder, M):
             kernel=kernel,
             likelihood=pg.likelihoods.Gaussian(sigma=0.1),
             inducing_variable=pg.inducing.Points(Z_placeholder),
-            q_mu=q_mu_var,
-            q_sqrt=q_sqrt_var,
+            variational_params=vp,
         )
-    return model, svgp, q_mu_var, q_sqrt_var
+    return model, svgp, vp
 
 
 class TestFrozenVars:
@@ -37,15 +34,15 @@ class TestFrozenVars:
         Z0 = np.linspace(0, 5, M)[:, None]
 
         Z_var = pt.matrix("Z")
-        model, svgp, q_mu_var, q_sqrt_var = _make_svgp(Z_var, M)
+        model, svgp, vp = _make_svgp(Z_var, M)
 
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
         train_step, _, _ = pg.optim.compile_training_step(
             pg.objectives.elbo, svgp, X_var, y_var,
             model=model,
-            extra_vars=[q_mu_var, q_sqrt_var],
-            extra_init=[np.zeros(M), np.eye(M)],
+            extra_vars=vp.extra_vars,
+            extra_init=vp.extra_init,
             frozen_vars={Z_var: Z0},
             learning_rate=1e-2,
         )
@@ -62,7 +59,7 @@ class TestFrozenVars:
         Z0 = np.linspace(0, 5, M)[:, None]
 
         Z_var = pt.matrix("Z")
-        model, svgp, q_mu_var, q_sqrt_var = _make_svgp(Z_var, M)
+        model, svgp, vp = _make_svgp(Z_var, M)
 
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
@@ -71,8 +68,8 @@ class TestFrozenVars:
         train_step_1, shared_1, extras_1 = pg.optim.compile_training_step(
             pg.objectives.elbo, svgp, X_var, y_var,
             model=model,
-            extra_vars=[q_mu_var, q_sqrt_var],
-            extra_init=[np.zeros(M), np.eye(M)],
+            extra_vars=vp.extra_vars,
+            extra_init=vp.extra_init,
             frozen_vars={Z_var: Z0},
             learning_rate=1e-2,
         )
@@ -83,8 +80,8 @@ class TestFrozenVars:
         train_step_2, shared_2, extras_2 = pg.optim.compile_training_step(
             pg.objectives.elbo, svgp, X_var, y_var,
             model=model,
-            extra_vars=[q_mu_var, q_sqrt_var, Z_var],
-            extra_init=[np.zeros(M), np.eye(M), Z0],
+            extra_vars=[*vp.extra_vars, Z_var],
+            extra_init=[*vp.extra_init, Z0],
             learning_rate=1e-2,
         )
         # Carry phase 1 state over.
@@ -103,7 +100,7 @@ class TestFrozenVars:
         Z_var = pt.matrix("Z")
         M = 5
         Z0 = np.linspace(0, 1, M)[:, None]
-        model, svgp, q_mu_var, q_sqrt_var = _make_svgp(Z_var, M)
+        model, svgp, vp = _make_svgp(Z_var, M)
 
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
@@ -112,8 +109,8 @@ class TestFrozenVars:
             pg.optim.compile_training_step(
                 pg.objectives.elbo, svgp, X_var, y_var,
                 model=model,
-                extra_vars=[q_mu_var, q_sqrt_var, Z_var],
-                extra_init=[np.zeros(M), np.eye(M), Z0],
+                extra_vars=[*vp.extra_vars, Z_var],
+                extra_init=[*vp.extra_init, Z0],
                 frozen_vars={Z_var: Z0},
                 learning_rate=1e-2,
             )

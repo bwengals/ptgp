@@ -141,7 +141,7 @@ class TestIntegrationWithSVGP:
     """Sanity check: output feeds into SVGP without hand-wrapping in pt.as_tensor_variable."""
 
     def test_numpy_z_flows_into_kernel(self):
-        from ptgp.gp import SVGP
+        from ptgp.gp import SVGP, VariationalParams
         from ptgp.likelihoods import Gaussian
         from ptgp.objectives import elbo
 
@@ -151,10 +151,15 @@ class TestIntegrationWithSVGP:
         kernel = ExpQuad(input_dim=1, ls=1.0)
 
         ip = greedy_variance_init(X, 5, kernel, rng=0)
+        vp = VariationalParams(
+            q_mu=pt.zeros(5),
+            q_sqrt=pt.specify_assumptions(pt.eye(5), lower_triangular=True),
+        )
         svgp = SVGP(
             kernel=kernel,
             likelihood=Gaussian(sigma=0.1),
             inducing_variable=ip,
+            variational_params=vp,
         )
         val = pytensor.function(
             [], elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))

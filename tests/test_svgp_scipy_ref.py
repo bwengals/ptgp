@@ -138,9 +138,8 @@ class TestSVGPStudentTSmoke:
         X, y = _studentt_data(rng, n=120)
         M = 12
 
-        q_mu_var = pt.vector("q_mu")
-        q_sqrt_var = pt.matrix("q_sqrt")
         Z_init = np.linspace(-2, 2, M)[:, None]
+        vp = pg.gp.init_variational_params(M)
 
         with pm.Model() as model:
             ls = pm.InverseGamma("ls", alpha=2.0, beta=1.0)
@@ -151,8 +150,7 @@ class TestSVGPStudentTSmoke:
                 kernel=kernel,
                 likelihood=pg.likelihoods.StudentT(nu=5.0, sigma=sigma),
                 inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z_init)),
-                q_mu=q_mu_var,
-                q_sqrt=q_sqrt_var,
+                variational_params=vp,
             )
 
         X_var = pt.matrix("X")
@@ -164,8 +162,8 @@ class TestSVGPStudentTSmoke:
             X_var,
             y_var,
             model=model,
-            extra_vars=[q_mu_var, q_sqrt_var],
-            extra_init=[np.zeros(M), np.eye(M)],
+            extra_vars=vp.extra_vars,
+            extra_init=vp.extra_init,
             learning_rate=5e-2,
         )
 
@@ -178,7 +176,7 @@ class TestSVGPStudentTSmoke:
             X_new_var,
             model,
             shared_params,
-            extra_vars=[q_mu_var, q_sqrt_var],
+            extra_vars=vp.extra_vars,
             shared_extras=shared_extras,
             incl_lik=False,
         )
@@ -200,24 +198,23 @@ class TestSVGPStudentTElboMatchesReference:
         ls = pt.scalar("ls")
         eta = pt.scalar("eta")
         sigma = pt.scalar("sigma")
-        q_mu = pt.vector("q_mu")
-        q_sqrt = pt.matrix("q_sqrt")
+        M = q_mu_val.shape[0]
+        vp = pg.gp.init_variational_params(M, q_mu_init=q_mu_val, q_sqrt_init=q_sqrt_val)
         kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
         svgp = pg.gp.SVGP(
             kernel=kernel,
             likelihood=pg.likelihoods.StudentT(nu=nu_val, sigma=sigma),
             inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z)),
-            q_mu=q_mu,
-            q_sqrt=q_sqrt,
+            variational_params=vp,
             whiten=True,
         )
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
         elbo_expr = pg.objectives.elbo(svgp, X_var, y_var)
         fn = pytensor.function(
-            [X_var, y_var, q_mu, q_sqrt, ls, eta, sigma], elbo_expr
+            [X_var, y_var, *vp.extra_vars, ls, eta, sigma], elbo_expr
         )
-        return float(fn(X, y, q_mu_val, q_sqrt_val, ls_val, eta_val, sigma_val))
+        return float(fn(X, y, *vp.extra_init, ls_val, eta_val, sigma_val))
 
     def test_elbo_match(self):
         rng = np.random.default_rng(5)
@@ -276,9 +273,8 @@ class TestSVGPNegBinomSmoke:
         X, y = _negbinom_data(rng, n=120)
         M = 12
 
-        q_mu_var = pt.vector("q_mu")
-        q_sqrt_var = pt.matrix("q_sqrt")
         Z_init = np.linspace(-2, 2, M)[:, None]
+        vp = pg.gp.init_variational_params(M)
 
         with pm.Model() as model:
             ls = pm.InverseGamma("ls", alpha=2.0, beta=1.0)
@@ -289,8 +285,7 @@ class TestSVGPNegBinomSmoke:
                 kernel=kernel,
                 likelihood=pg.likelihoods.NegativeBinomial(alpha=alpha),
                 inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z_init)),
-                q_mu=q_mu_var,
-                q_sqrt=q_sqrt_var,
+                variational_params=vp,
             )
 
         X_var = pt.matrix("X")
@@ -302,8 +297,8 @@ class TestSVGPNegBinomSmoke:
             X_var,
             y_var,
             model=model,
-            extra_vars=[q_mu_var, q_sqrt_var],
-            extra_init=[np.zeros(M), np.eye(M)],
+            extra_vars=vp.extra_vars,
+            extra_init=vp.extra_init,
             learning_rate=5e-2,
         )
 
@@ -316,7 +311,7 @@ class TestSVGPNegBinomSmoke:
             X_new_var,
             model,
             shared_params,
-            extra_vars=[q_mu_var, q_sqrt_var],
+            extra_vars=vp.extra_vars,
             shared_extras=shared_extras,
             incl_lik=True,
         )
@@ -338,24 +333,23 @@ class TestSVGPNegBinomElboMatchesReference:
         ls = pt.scalar("ls")
         eta = pt.scalar("eta")
         alpha = pt.scalar("alpha")
-        q_mu = pt.vector("q_mu")
-        q_sqrt = pt.matrix("q_sqrt")
+        M = q_mu_val.shape[0]
+        vp = pg.gp.init_variational_params(M, q_mu_init=q_mu_val, q_sqrt_init=q_sqrt_val)
         kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
         svgp = pg.gp.SVGP(
             kernel=kernel,
             likelihood=pg.likelihoods.NegativeBinomial(alpha=alpha),
             inducing_variable=pg.inducing.Points(pt.as_tensor_variable(Z)),
-            q_mu=q_mu,
-            q_sqrt=q_sqrt,
+            variational_params=vp,
             whiten=True,
         )
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
         elbo_expr = pg.objectives.elbo(svgp, X_var, y_var)
         fn = pytensor.function(
-            [X_var, y_var, q_mu, q_sqrt, ls, eta, alpha], elbo_expr
+            [X_var, y_var, *vp.extra_vars, ls, eta, alpha], elbo_expr
         )
-        return float(fn(X, y, q_mu_val, q_sqrt_val, ls_val, eta_val, alpha_val))
+        return float(fn(X, y, *vp.extra_init, ls_val, eta_val, alpha_val))
 
     def test_elbo_match(self):
         rng = np.random.default_rng(7)
