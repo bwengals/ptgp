@@ -20,7 +20,8 @@ from pytensor.tensor.assumptions import (
 from pytensor.tensor.blockwise import Blockwise
 from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.inverse import MatrixInverse
-from pytensor.tensor.linalg.summary import SLogDet
+from pytensor.tensor.basic import ExtractDiag
+from pytensor.tensor.linalg.summary import Det, SLogDet
 
 # Install the assumption rules and rewrites under test (side-effect import).
 import ptgp.rewrites  # noqa: F401
@@ -217,6 +218,87 @@ def test_slogdet_lowering_is_numerically_correct():
     A = rng.standard_normal((6, 6))
     K_val = A @ A.T + np.eye(6)
     np.testing.assert_allclose(f(K_val), np.linalg.slogdet(K_val)[1], atol=1e-8)
+
+
+def test_slogdet_of_LLT_takes_diag_shortcut_when_L_lower_triangular():
+    """SLogDet(L @ L.T) collapses to ``2 * sum(log|diag(L)|)`` — no Cholesky, no SLogDet."""
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    _, logdet = pt.linalg.slogdet(L @ L.T)
+    rewritten = rewrite_graph(logdet, include=("fast_run",))
+    assert not _has_op(rewritten, SLogDet)
+    assert not _has_op(rewritten, Cholesky)
+
+
+def test_slogdet_of_LLT_diag_shortcut_is_numerically_correct():
+    """The diag shortcut produces the same value as full slogdet."""
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    _, logdet = pt.linalg.slogdet(L @ L.T)
+    f = function([L.owner.inputs[0]], logdet)
+
+    rng = np.random.default_rng(0)
+    M = 6
+    L_val = np.tril(rng.standard_normal((M, M)))
+    L_val[np.arange(M), np.arange(M)] = np.abs(L_val[np.arange(M), np.arange(M)]) + 0.5
+    expected = float(np.linalg.slogdet(L_val @ L_val.T)[1])
+    np.testing.assert_allclose(f(L_val), expected, atol=1e-12)
+
+
+def test_slogdet_of_LLT_diag_shortcut_handles_signed_diagonal():
+    """``log|x²|`` style is robust to signed diagonal entries on L."""
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    _, logdet = pt.linalg.slogdet(L @ L.T)
+    f = function([L.owner.inputs[0]], logdet)
+
+    rng = np.random.default_rng(1)
+    M = 5
+    L_val = np.tril(rng.standard_normal((M, M)))
+    # Mix positive and negative diagonals.
+    diag = rng.standard_normal(M)
+    L_val[np.arange(M), np.arange(M)] = np.where(np.abs(diag) > 0.3, diag, np.sign(diag) * 0.5)
+    expected = float(np.linalg.slogdet(L_val @ L_val.T)[1])
+    np.testing.assert_allclose(f(L_val), expected, atol=1e-12)
+
+
+def test_det_of_LLT_takes_diag_product_when_L_lower_triangular():
+    """``Det(L @ L.T)`` lowers to ``(prod(diag(L)))**2`` — no Det Apply remains."""
+    from pytensor.tensor.linalg.summary import det
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    d = det(L @ L.T)
+    rewritten = rewrite_graph(d, include=("fast_run",))
+    assert not _has_op(rewritten, Det)
+
+
+def test_det_of_LLT_diag_product_is_numerically_correct():
+    from pytensor.tensor.linalg.summary import det
+    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    d = det(L @ L.T)
+    f = function([L.owner.inputs[0]], d)
+
+    rng = np.random.default_rng(0)
+    M = 5
+    L_val = np.tril(rng.standard_normal((M, M)))
+    L_val[np.arange(M), np.arange(M)] = np.abs(L_val[np.arange(M), np.arange(M)]) + 0.5
+    expected = float(np.linalg.det(L_val @ L_val.T))
+    np.testing.assert_allclose(f(L_val), expected, atol=1e-10)
+
+
+def test_diag_of_AAT_to_row_norms_squared_eliminates_dot():
+    """``ExtractDiag(A @ A.T)`` lowers to ``sum(A**2, axis=-1)`` — no Dot, no ExtractDiag."""
+    A = pt.dmatrix("A")
+    out = pt.diagonal(A @ A.T)
+    rewritten = rewrite_graph(out, include=("fast_run",))
+    # Folds out: no ExtractDiag (no need to extract diag of an outer product).
+    assert not _has_op(rewritten, ExtractDiag)
+
+
+def test_diag_of_AAT_is_numerically_correct():
+    A = pt.dmatrix("A")
+    out = pt.diagonal(A @ A.T)
+    f = function([A], out)
+
+    rng = np.random.default_rng(0)
+    A_val = rng.standard_normal((6, 4))   # non-square — diagonal still defined for A @ A.T
+    np.testing.assert_allclose(f(A_val), np.diag(A_val @ A_val.T), atol=1e-12)
 
 
 # ---------------------------------------------------------------------------

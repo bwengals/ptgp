@@ -23,6 +23,7 @@ from pytensor.tensor.assumptions.core import (
 from pytensor.tensor.assumptions.diagonal import indexes_diagonal
 from pytensor.tensor.assumptions.positive_definite import POSITIVE_DEFINITE
 from pytensor.tensor.assumptions.specify import SpecifyAssumptions
+from pytensor.tensor.assumptions.triangular import LOWER_TRIANGULAR
 from pytensor.tensor.assumptions.utils import check_assumption, eye_is_identity, true_if
 from pytensor.tensor.basic import (
     Alloc,
@@ -39,7 +40,8 @@ from pytensor.tensor.linalg.decomposition.cholesky import Cholesky, cholesky
 from pytensor.tensor.linalg.inverse import MatrixInverse
 from pytensor.tensor.linalg.solvers.general import Solve
 from pytensor.tensor.linalg.solvers.psd import CholeskySolve, cho_solve
-from pytensor.tensor.linalg.summary import SLogDet
+from pytensor.tensor.blas import Dot22
+from pytensor.tensor.linalg.summary import Det, SLogDet
 from pytensor.tensor.math import Dot
 from pytensor.tensor.rewriting.basic import register_specialize
 from pytensor.tensor.rewriting.blockwise import blockwise_of
@@ -302,11 +304,51 @@ def _existing_cholesky(fgraph, A):
     return None
 
 
+def _try_LLT_lower_factor(fgraph, A):
+    """If ``A = L @ L.T`` for some lower-triangular ``L``, return ``L``; else None.
+
+    Matches both ``Dot`` (pre-specialize) and ``Dot22`` (BLAS-specialized).
+    """
+    if A.owner is None:
+        return None
+    op = A.owner.op
+    core_op = op.core_op if isinstance(op, Blockwise) else op
+    if not isinstance(core_op, (Dot, Dot22)):
+        return None
+    L, B = A.owner.inputs
+    if _matrix_transpose_of(B) is not L:
+        return None
+    if not check_assumption(fgraph, L, LOWER_TRIANGULAR):
+        return None
+    return L
+
+
 @register_specialize
 @node_rewriter([SLogDet])
 def slogdet_psd_to_cholesky(fgraph, node):
-    """SLogDet(A) -> (1, 2*sum(log(diag(cholesky(A))))) for PSD A."""
+    """``SLogDet(A)`` -> simplified form when ``A`` is PSD.
+
+    Two paths:
+    - If ``A = L @ L.T`` for lower-triangular ``L`` (annotated): take the
+      diagonal shortcut ``2 * sum(log|diag(L)|)``. No Cholesky needed.
+    - Otherwise (generic PSD ``A``): lower to
+      ``2 * sum(log(diag(Cholesky(A))))``, sharing an existing Cholesky if
+      one is already in the graph.
+    """
     [A] = node.inputs
+
+    sign_old, logabsdet_old = node.outputs
+
+    L = _try_LLT_lower_factor(fgraph, A)
+    if L is not None:
+        sign_new = pt.ones((), dtype=sign_old.dtype)
+        diag_L = pt.diagonal(L, axis1=-2, axis2=-1)
+        logabsdet_new = (
+            2.0 * pt.log(pt.abs(diag_L)).sum(axis=-1)
+        ).astype(logabsdet_old.dtype)
+        copy_stack_trace([sign_old, logabsdet_old], [sign_new, logabsdet_new])
+        return [sign_new, logabsdet_new]
+
     if not check_assumption(fgraph, A, POSITIVE_DEFINITE):
         return None
 
@@ -314,13 +356,67 @@ def slogdet_psd_to_cholesky(fgraph, node):
     if L is None:
         L = cholesky(A, lower=True)
 
-    sign_old, logabsdet_old = node.outputs
     sign_new = pt.ones((), dtype=sign_old.dtype)
     logabsdet_new = (2.0 * pt.log(pt.diagonal(L, axis1=-2, axis2=-1)).sum(axis=-1)).astype(
         logabsdet_old.dtype
     )
     copy_stack_trace([sign_old, logabsdet_old], [sign_new, logabsdet_new])
     return [sign_new, logabsdet_new]
+
+
+# ---------------------------------------------------------------------------
+# Det(L @ L.T) -> (prod(diag(L)))**2 for lower-triangular L.
+#
+# Identity: det(L @ L.T) = det(L)**2 = (prod(diag(L)))**2 (always >= 0).
+# Eliminates the standalone Det Apply that survives slogdet_specialization
+# when Det is also referenced by the gradient pullback (det(M) * inv(M).T).
+# ---------------------------------------------------------------------------
+
+
+@register_specialize
+@node_rewriter([blockwise_of(Det)])
+def det_of_LLT_to_diag_product(fgraph, node):
+    """``Det(L @ L.T)`` -> ``(prod(diag(L)))**2`` for lower-triangular ``L``."""
+    [A] = node.inputs
+    L = _try_LLT_lower_factor(fgraph, A)
+    if L is None:
+        return None
+    diag_L = pt.diagonal(L, axis1=-2, axis2=-1)
+    new_det = (diag_L.prod(axis=-1) ** 2).astype(node.outputs[0].dtype)
+    copy_stack_trace(node.outputs[0], new_det)
+    return [new_det]
+
+
+# ---------------------------------------------------------------------------
+# ExtractDiag(A @ A.T) -> sum(A**2, axis=-1) for any matrix A.
+#
+# Identity: (A @ A.T)[i,i] = sum_k A[i,k]^2 = ||A_row_i||^2. Folding this lets
+# pt.trace(L @ L.T) compile to ||L||_F^2 directly, eliminating the M^2-element
+# materialization of the L @ L.T outer product just to take its trace.
+# Generally useful — not GP-specific. No assumption needed on A.
+# ---------------------------------------------------------------------------
+
+
+@register_specialize
+@node_rewriter([ExtractDiag])
+def diag_of_AAT_to_row_norms_squared(fgraph, node):
+    """``ExtractDiag(A @ A.T)`` -> ``sum(A**2, axis=-1)``."""
+    extract_op = node.op
+    if extract_op.offset != 0 or extract_op.axis1 != 0 or extract_op.axis2 != 1:
+        return None
+    [A_AT] = node.inputs
+    if A_AT.owner is None:
+        return None
+    op = A_AT.owner.op
+    core_op = op.core_op if isinstance(op, Blockwise) else op
+    if not isinstance(core_op, (Dot, Dot22)):
+        return None
+    A, B = A_AT.owner.inputs
+    if _matrix_transpose_of(B) is not A:
+        return None
+    new_diag = pt.sum(pt.sqr(A), axis=-1).astype(node.outputs[0].dtype)
+    copy_stack_trace(node.outputs[0], new_diag)
+    return [new_diag]
 
 
 # ---------------------------------------------------------------------------
@@ -333,14 +429,23 @@ def slogdet_psd_to_cholesky(fgraph, node):
 @register_specialize
 @node_rewriter([blockwise_of(MatrixInverse)])
 def matrix_inverse_psd_to_cholesky(fgraph, node):
-    """MatrixInverse(A) -> cho_solve(L, eye) for PSD A, reusing an existing Cholesky(A)."""
-    [A] = node.inputs
-    if not check_assumption(fgraph, A, POSITIVE_DEFINITE):
-        return None
+    """``MatrixInverse(A)`` -> ``cho_solve(L, eye)`` for PSD ``A``.
 
-    L = _existing_cholesky(fgraph, A)
+    Two paths:
+    - If ``A = L @ L.T`` for lower-triangular ``L`` (annotated): use ``L``
+      directly, no fresh Cholesky.
+    - Otherwise: compute ``L = Cholesky(A)``, sharing an existing one if
+      already in the graph.
+    """
+    [A] = node.inputs
+
+    L = _try_LLT_lower_factor(fgraph, A)
     if L is None:
-        L = cholesky(A, lower=True)
+        if not check_assumption(fgraph, A, POSITIVE_DEFINITE):
+            return None
+        L = _existing_cholesky(fgraph, A)
+        if L is None:
+            L = cholesky(A, lower=True)
 
     eye = pt.eye(A.shape[-1], dtype=A.dtype)
     inv_A = cho_solve((L, True), eye)
