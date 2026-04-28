@@ -153,7 +153,7 @@ class TestIntegrationWithSVGP:
         ip = greedy_variance_init(X, 5, kernel, rng=0)
         vp = VariationalParams(
             q_mu=pt.zeros(5),
-            q_sqrt=pt.specify_assumptions(pt.eye(5), lower_triangular=True),
+            q_sqrt=pt.assume(pt.eye(5), lower_triangular=True),
         )
         svgp = SVGP(
             kernel=kernel,

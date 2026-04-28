@@ -56,7 +56,7 @@ from pytensor.tensor.subtensor import AdvancedIncSubtensor, IncSubtensor
 POSITIVE = AssumptionKey("positive")
 
 
-def _specify_assumptions(
+def _assume(
     x,
     diagonal=None,
     lower_triangular=None,
@@ -66,7 +66,7 @@ def _specify_assumptions(
     orthogonal=False,
     positive=False,
 ):
-    """Drop-in replacement for ``pt.specify_assumptions`` that also accepts ``positive=True``."""
+    """Drop-in replacement for ``pt.assume`` that also accepts ``positive=True``."""
     x = as_tensor_variable(x)
     names = {
         name
@@ -86,18 +86,18 @@ def _specify_assumptions(
     return SpecifyAssumptions(frozenset(names))(x)
 
 
-# Patch every public binding of ``specify_assumptions`` so ``pt.specify_assumptions(sigma, positive=True)``
+# Patch every public binding of ``assume`` so ``pt.assume(sigma, positive=True)``
 # works regardless of which module the caller imported it from.
-def _install_specify_patch():
+def _install_assume_patch():
     import pytensor.tensor as _pt
     import pytensor.tensor.assumptions as _assumptions_pkg
     from pytensor.tensor.assumptions import specify as _specify_module
 
     for module in (_pt, _assumptions_pkg, _specify_module):
-        module.specify_assumptions = _specify_assumptions
+        module.assume = _assume
 
 
-_install_specify_patch()
+_install_assume_patch()
 
 
 @register_assumption(POSITIVE, Elemwise)

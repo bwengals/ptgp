@@ -40,23 +40,23 @@ def make_fgraph(*outputs, inputs=None):
 # ---------------------------------------------------------------------------
 
 
-def test_specify_assumptions_accepts_positive_kwarg():
+def test_assume_accepts_positive_kwarg():
     x = pt.dscalar("x")
-    y = pt.specify_assumptions(x, positive=True)
+    y = pt.assume(x, positive=True)
     _, af = make_fgraph(y, inputs=[x])
     assert af.check(y, POSITIVE)
 
 
 def test_positive_propagates_through_sqr_and_pow():
-    x = pt.specify_assumptions(pt.dscalar("x"), positive=True)
+    x = pt.assume(pt.dscalar("x"), positive=True)
     _, af = make_fgraph(x**2, x**3.5, inputs=[x.owner.inputs[0]])
     assert af.check(x**2, POSITIVE)
     assert af.check(x**3.5, POSITIVE)
 
 
 def test_positive_propagates_through_mul_only_if_all_positive():
-    x = pt.specify_assumptions(pt.dscalar("x"), positive=True)
-    y = pt.specify_assumptions(pt.dscalar("y"), positive=True)
+    x = pt.assume(pt.dscalar("x"), positive=True)
+    y = pt.assume(pt.dscalar("y"), positive=True)
     z = pt.dscalar("z")  # no assumption
     _, af = make_fgraph(x * y, x * z, inputs=[x.owner.inputs[0], y.owner.inputs[0], z])
     assert af.check(x * y, POSITIVE)
@@ -64,7 +64,7 @@ def test_positive_propagates_through_mul_only_if_all_positive():
 
 
 def test_positive_propagates_through_dimshuffle():
-    x = pt.specify_assumptions(pt.dvector("x"), positive=True)
+    x = pt.assume(pt.dvector("x"), positive=True)
     _, af = make_fgraph(x[None, :], inputs=[x.owner.inputs[0]])
     assert af.check(x[None, :], POSITIVE)
 
@@ -96,7 +96,7 @@ def test_diagonal_of_identity_is_positive():
 
 
 def test_alloc_diag_of_symbolic_positive_vector_is_psd():
-    v = pt.specify_assumptions(pt.dvector("v"), positive=True)
+    v = pt.assume(pt.dvector("v"), positive=True)
     M = pt.diag(v)
     _, af = make_fgraph(M, inputs=[v.owner.inputs[0]])
     assert af.check(M, POSITIVE_DEFINITE)
@@ -110,15 +110,15 @@ def test_alloc_diag_of_unknown_vector_is_not_psd():
 
 
 def test_mul_of_positive_scalar_and_psd_matrix_is_psd():
-    sigma = pt.specify_assumptions(pt.dscalar("sigma"), positive=True)
-    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    sigma = pt.assume(pt.dscalar("sigma"), positive=True)
+    K = pt.assume(pt.dmatrix("K"), positive_definite=True, symmetric=True)
     M = sigma**2 * K
     _, af = make_fgraph(M, inputs=[sigma.owner.inputs[0], K.owner.inputs[0]])
     assert af.check(M, POSITIVE_DEFINITE)
 
 
 def test_psd_propagates_through_matrix_transpose():
-    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    K = pt.assume(pt.dmatrix("K"), positive_definite=True, symmetric=True)
     _, af = make_fgraph(K.T, inputs=[K.owner.inputs[0]])
     assert af.check(K.T, POSITIVE_DEFINITE)
 
@@ -126,7 +126,7 @@ def test_psd_propagates_through_matrix_transpose():
 def test_quadratic_form_dot_is_psd():
     """X.T @ M @ X is PSD when M is PSD."""
     X = pt.dmatrix("X")
-    M = pt.specify_assumptions(pt.dmatrix("M"), positive_definite=True, symmetric=True)
+    M = pt.assume(pt.dmatrix("M"), positive_definite=True, symmetric=True)
     Q = X.T.dot(M.dot(X))
     _, af = make_fgraph(Q, inputs=[X, M.owner.inputs[0]])
     assert af.check(Q, POSITIVE_DEFINITE)
@@ -135,7 +135,7 @@ def test_quadratic_form_dot_is_psd():
 def test_quadratic_form_with_solve_is_psd():
     """X.T @ M^{-1} @ X (written as Solve) is PSD when M is PSD."""
     X = pt.dmatrix("X")
-    M = pt.specify_assumptions(pt.dmatrix("M"), positive_definite=True, symmetric=True)
+    M = pt.assume(pt.dmatrix("M"), positive_definite=True, symmetric=True)
     Q = X.T.dot(pt.linalg.solve(M, X))
     _, af = make_fgraph(Q, inputs=[X, M.owner.inputs[0]])
     assert af.check(Q, POSITIVE_DEFINITE)
@@ -144,7 +144,7 @@ def test_quadratic_form_with_solve_is_psd():
 def test_quadratic_form_with_cholesky_solve_is_psd():
     """X.T @ M^{-1} @ X (written as CholeskySolve) is PSD when L = Cholesky(M)."""
     X = pt.dmatrix("X")
-    M = pt.specify_assumptions(pt.dmatrix("M"), positive_definite=True, symmetric=True)
+    M = pt.assume(pt.dmatrix("M"), positive_definite=True, symmetric=True)
     L = cholesky(M, lower=True)
     Q = X.T.dot(pt.linalg.cho_solve((L, True), X))
     _, af = make_fgraph(Q, inputs=[X, M.owner.inputs[0]])
@@ -154,7 +154,7 @@ def test_quadratic_form_with_cholesky_solve_is_psd():
 def test_set_subtensor_of_zeros_with_positive_diagonal_is_psd():
     """``zeros(N, N)[arange(N), arange(N)] = positive_vec`` is PSD."""
     n = pt.lscalar("n")
-    v = pt.specify_assumptions(pt.dvector("v"), positive=True)
+    v = pt.assume(pt.dvector("v"), positive=True)
     base = pt.zeros((n, n))
     idx = pt.arange(n)
     M = pt.set_subtensor(base[idx, idx], v)
@@ -178,7 +178,7 @@ def _has_op(graph, op_type):
 
 
 def test_slogdet_of_psd_is_lowered_to_cholesky():
-    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    K = pt.assume(pt.dmatrix("K"), positive_definite=True, symmetric=True)
     _, logdet = pt.linalg.slogdet(K)
     rewritten = rewrite_graph(logdet, include=("fast_run",))
     assert not _has_op(rewritten, SLogDet)
@@ -195,7 +195,7 @@ def test_slogdet_without_psd_is_not_lowered():
 
 def test_slogdet_reuses_existing_cholesky():
     """When an upstream Solve has already produced ``Cholesky(K)``, SLogDet should reuse it."""
-    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    K = pt.assume(pt.dmatrix("K"), positive_definite=True, symmetric=True)
     b = pt.dvector("b")
     x = pt.linalg.solve(K, b, assume_a="pos")
     _, logdet = pt.linalg.slogdet(K)
@@ -210,7 +210,7 @@ def test_slogdet_reuses_existing_cholesky():
 
 
 def test_slogdet_lowering_is_numerically_correct():
-    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    K = pt.assume(pt.dmatrix("K"), positive_definite=True, symmetric=True)
     _, logdet = pt.linalg.slogdet(K)
     f = function([K.owner.inputs[0]], logdet)
 
@@ -222,7 +222,7 @@ def test_slogdet_lowering_is_numerically_correct():
 
 def test_slogdet_of_LLT_takes_diag_shortcut_when_L_lower_triangular():
     """SLogDet(L @ L.T) collapses to ``2 * sum(log|diag(L)|)`` — no Cholesky, no SLogDet."""
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     _, logdet = pt.linalg.slogdet(L @ L.T)
     rewritten = rewrite_graph(logdet, include=("fast_run",))
     assert not _has_op(rewritten, SLogDet)
@@ -231,7 +231,7 @@ def test_slogdet_of_LLT_takes_diag_shortcut_when_L_lower_triangular():
 
 def test_slogdet_of_LLT_diag_shortcut_is_numerically_correct():
     """The diag shortcut produces the same value as full slogdet."""
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     _, logdet = pt.linalg.slogdet(L @ L.T)
     f = function([L.owner.inputs[0]], logdet)
 
@@ -245,7 +245,7 @@ def test_slogdet_of_LLT_diag_shortcut_is_numerically_correct():
 
 def test_slogdet_of_LLT_diag_shortcut_handles_signed_diagonal():
     """``log|x²|`` style is robust to signed diagonal entries on L."""
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     _, logdet = pt.linalg.slogdet(L @ L.T)
     f = function([L.owner.inputs[0]], logdet)
 
@@ -262,7 +262,7 @@ def test_slogdet_of_LLT_diag_shortcut_handles_signed_diagonal():
 def test_det_of_LLT_takes_diag_product_when_L_lower_triangular():
     """``Det(L @ L.T)`` lowers to ``(prod(diag(L)))**2`` — no Det Apply remains."""
     from pytensor.tensor.linalg.summary import det
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     d = det(L @ L.T)
     rewritten = rewrite_graph(d, include=("fast_run",))
     assert not _has_op(rewritten, Det)
@@ -270,7 +270,7 @@ def test_det_of_LLT_takes_diag_product_when_L_lower_triangular():
 
 def test_det_of_LLT_diag_product_is_numerically_correct():
     from pytensor.tensor.linalg.summary import det
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     d = det(L @ L.T)
     f = function([L.owner.inputs[0]], d)
 
@@ -321,7 +321,7 @@ def test_diag_of_ATA_is_numerically_correct():
 
 def test_slogdet_of_LTL_takes_diag_shortcut_when_L_lower_triangular():
     """``SLogDet(L.T @ L)`` lowers via the diagonal shortcut — same as L @ L.T."""
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     _, logdet = pt.linalg.slogdet(L.T @ L)
     rewritten = rewrite_graph(logdet, include=("fast_run",))
     assert not _has_op(rewritten, SLogDet)
@@ -329,7 +329,7 @@ def test_slogdet_of_LTL_takes_diag_shortcut_when_L_lower_triangular():
 
 
 def test_slogdet_of_LTL_is_numerically_correct():
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     _, logdet = pt.linalg.slogdet(L.T @ L)
     f = function([L.owner.inputs[0]], logdet)
 
@@ -343,7 +343,7 @@ def test_slogdet_of_LTL_is_numerically_correct():
 
 def test_matrix_inverse_of_LTL_uses_solve_triangular():
     """``MatrixInverse(L.T @ L)`` lowers to two solve_triangular calls — no fresh Cholesky."""
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     inv_M = pt.linalg.inv(L.T @ L)
     rewritten = rewrite_graph(inv_M, include=("fast_run",))
     # No MatrixInverse, no Cholesky (L is reused via solve_triangular).
@@ -352,7 +352,7 @@ def test_matrix_inverse_of_LTL_uses_solve_triangular():
 
 
 def test_matrix_inverse_of_LTL_is_numerically_correct():
-    L = pt.specify_assumptions(pt.dmatrix("L"), lower_triangular=True)
+    L = pt.assume(pt.dmatrix("L"), lower_triangular=True)
     inv_M = pt.linalg.inv(L.T @ L)
     f = function([L.owner.inputs[0]], inv_M)
 
@@ -370,7 +370,7 @@ def test_matrix_inverse_of_LTL_is_numerically_correct():
 
 
 def test_matrix_inverse_of_psd_is_lowered_to_cholesky():
-    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    K = pt.assume(pt.dmatrix("K"), positive_definite=True, symmetric=True)
     inv_K = pt.linalg.inv(K)
     rewritten = rewrite_graph(inv_K, include=("fast_run",))
     assert not _has_op(rewritten, MatrixInverse)
@@ -387,7 +387,7 @@ def test_matrix_inverse_without_psd_is_not_lowered():
 
 def test_matrix_inverse_reuses_existing_cholesky():
     """Sibling Solve(K, b) and inv(K) should share one Cholesky factor."""
-    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    K = pt.assume(pt.dmatrix("K"), positive_definite=True, symmetric=True)
     b = pt.dvector("b")
     x = pt.linalg.solve(K, b, assume_a="pos")
     inv_K = pt.linalg.inv(K)
@@ -402,7 +402,7 @@ def test_matrix_inverse_reuses_existing_cholesky():
 
 
 def test_matrix_inverse_lowering_is_numerically_correct():
-    K = pt.specify_assumptions(pt.dmatrix("K"), positive_definite=True, symmetric=True)
+    K = pt.assume(pt.dmatrix("K"), positive_definite=True, symmetric=True)
     inv_K = pt.linalg.inv(K)
     f = function([K.owner.inputs[0]], inv_K)
 

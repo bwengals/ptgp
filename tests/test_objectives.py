@@ -58,7 +58,7 @@ class TestELBO:
     def _identity_vp(self, M):
         return VariationalParams(
             q_mu=pt.zeros(M),
-            q_sqrt=pt.specify_assumptions(pt.eye(M), lower_triangular=True),
+            q_sqrt=pt.assume(pt.eye(M), lower_triangular=True),
         )
 
     def test_finite(self, regression_data, inducing_points):
@@ -109,7 +109,7 @@ class TestELBO:
         Luu = np.linalg.cholesky(Kuu)
         vp_u = VariationalParams(
             q_mu=pt.zeros(5),
-            q_sqrt=pt.specify_assumptions(pt.as_tensor_variable(Luu), lower_triangular=True),
+            q_sqrt=pt.assume(pt.as_tensor_variable(Luu), lower_triangular=True),
         )
         svgp_u = SVGP(
             kernel=kernel,

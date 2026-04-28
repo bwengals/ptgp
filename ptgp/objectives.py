@@ -111,7 +111,7 @@ def collapsed_elbo(vfe, X, y):
 
     # Woodbury: invert only the M × M matrix D, never the N × N cov.
     D = sigma2 * Kuu + Kuf @ Kuf.T    # PSD by Gram construction
-    D = pt.specify_assumptions(D, positive_definite=True, symmetric=True)
+    D = pt.assume(D, positive_definite=True, symmetric=True)
 
     diff = y - mu
     Kuf_diff = Kuf @ diff
