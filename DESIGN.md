@@ -164,15 +164,15 @@ Deferred until the dense-matrix SVGP path is solid and the upstream assumption-s
 
 ## Multi-Output GPs (planned)
 
-Following GPflow's architecture. Data convention: `X (N, D)`, `Y (N, P)` where P is the number of outputs, L is the number of latent GPs.
+Following GPflow's architecture. Data convention: `X (N, D)`, `Y (N, K)` where K is the number of outputs, L is the number of latent GPs. (Letters `N`, `M`, `D`, `K` follow the project-wide convention in `CLAUDE.md`; `L` is added here for latent GPs in coregionalization.)
 
 ### Multi-output kernels
 
 Wrappers that produce per-output or per-latent covariance matrices:
 
-- `SharedIndependent(kernel, output_dim)` — same kernel for all outputs. Returns `(P, N, N)`.
-- `SeparateIndependent([k1, k2, ...])` — different kernel per output. Returns `(P, N, N)`.
-- `LinearCoregionalization(kernels, W)` — L latent GPs mixed through a `(P, L)` weight matrix W. The key multi-output model for correlated outputs.
+- `SharedIndependent(kernel, output_dim)` — same kernel for all outputs. Returns `(K, N, N)`.
+- `SeparateIndependent([k1, k2, ...])` — different kernel per output. Returns `(K, N, N)`.
+- `LinearCoregionalization(kernels, W)` — L latent GPs mixed through a `(K, L)` weight matrix W. The key multi-output model for correlated outputs.
 
 ### Multi-output inducing variables
 
@@ -183,7 +183,7 @@ Wrappers that produce per-output or per-latent covariance matrices:
 
 A dispatch layer above `base_conditional` selects the right implementation based on (kernel type, inducing variable type):
 
-- **SharedIndependent + SharedInducing**: call `base_conditional` once, broadcast across P outputs.
+- **SharedIndependent + SharedInducing**: call `base_conditional` once, broadcast across K outputs.
 - **SeparateIndependent + SeparateInducing**: call `base_conditional` L times, one per latent GP.
 - **LinearCoregionalization**: call `base_conditional` L times for latent GPs, then mix with `f = W @ g`.
 

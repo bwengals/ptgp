@@ -28,6 +28,21 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 - **Name symbolic variables in complex examples**: Pass `name="..."` when constructing PyTensor variables (`pt.matrix("X")`, `pt.dmatrix("Z_var")`, etc.) in examples that involve per-group learning rates, per-group schedules, or multi-phase training loops. In those settings, symbolic vars become dict keys (e.g. in `param_groups`) and show up in error messages — error text falls back to `var.name or repr(var)`, and unnamed vars render as opaque addresses. Simple single-phase examples don't need this.
 - **Prefix internal symbolic var names with `_`**: Any PyTensor variable named inside library code (e.g. `pt.vector("_theta")`, `pt.matrix("_X_opt")`) must start with an underscore. User-named variables never start with `_`, so the prefix distinguishes library-internal names from user names in error messages, graph dumps, and debugging. Example: `pt.matrix("_X", dtype="float64")` inside `greedy_variance_init`.
 - **Error messages**: Keep them concise and include either a brief suggestion of the fix or the reason/contradiction that caused the error. One or two short sentences. The first sentence names the problem; the second names the reason or the fix. Example: `"Variables appear in both extra_vars and frozen_vars: [...]. They cannot be both trainable and frozen."`
+- **Shape annotations on symbolic vars**: When defining `pt.matrix(...)`, `pt.vector(...)`, etc., pass `shape=(...)` for every dimension known at construction time. Use `None` only when the dimension genuinely varies between calls (typically the data axis `N`, which differs across training/eval/batches). Standard letters used throughout ptgp:
+  - `N` — number of data points (almost always `None`)
+  - `M` — number of inducing points (concrete int, known when `Z` / `init_variational_params(M)` is constructed)
+  - `D` — input dimension / columns of `X` (concrete int, known when the kernel is constructed)
+  - `K` — number of outputs / columns of `Y` (concrete int, when multi-output is added)
+
+  Examples:
+  ```python
+  X    = pt.matrix("X",    shape=(None, D))
+  y    = pt.vector("y",    shape=(None,))
+  Z    = pt.matrix("Z",    shape=(M, D))
+  q_mu = pt.vector("q_mu", shape=(M,))
+  ```
+
+  Why: shape info lets PyTensor's rewrite system specialize (e.g., the future Woodbury rewrite gates on `M < N`), catches shape mismatches at compile time, and documents axis intent. Even single-axis annotations (`shape=(None, 1)` for 1-D data) are worth it. Applies to library code, tests, examples, and notebooks alike.
 
 ## Testing
 
