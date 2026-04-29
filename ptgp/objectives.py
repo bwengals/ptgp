@@ -1,6 +1,11 @@
 import pytensor.tensor as pt
 
 
+# Diagonal jitter added to Kuu before Cholesky / inversion, to keep it PSD
+# under floating-point noise. Matches GPflow / GPJax / PyMC defaults of 1e-6.
+_DEFAULT_JITTER = 1e-6
+
+
 def marginal_log_likelihood(gp, X, y):
     """Exact GP log marginal likelihood.
 
@@ -104,6 +109,14 @@ def collapsed_elbo(vfe, X, y):
     Kff_diag = vfe.kernel.diag(X)
     Kuf = vfe.kernel(Z, X)            # M × N
     Kuu = vfe.kernel(Z)               # M × M
+    # Add jitter to keep Kuu PSD under float noise — matches GPflow / PyMC default.
+    # Re-annotate after the addition: PyTensor canonicalizes ``Kuu + c·I`` into a
+    # ``set_subtensor`` on the diagonal, which our PSD-inference rules don't see
+    # through. The mathematical identity (PSD + c·I PSD ⇒ PSD) is sound.
+    Kuu = pt.assume(
+        Kuu + _DEFAULT_JITTER * pt.eye(M, dtype=Kuu.dtype),
+        positive_definite=True, symmetric=True,
+    )
 
     # Q_diag = diag(Kuf.T @ inv(Kuu) @ Kuf) for the trace penalty.
     Kuu_inv_Kuf = pt.linalg.inv(Kuu) @ Kuf

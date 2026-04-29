@@ -21,7 +21,7 @@ import gpjax as gpx
 
 import ptgp as pg
 
-ATOL = 1e-5
+ATOL = 1e-4  # cross-library noise is ~3e-5 once both libs jitter at 1e-6
 
 
 def _binary_data(rng, n=80):
@@ -141,13 +141,13 @@ class TestSVGPBernoulliElboMatchesGPJax:
         prior = gpx.gps.Prior(mean_function=meanf, kernel=kernel)
         likelihood = gpx.likelihoods.Bernoulli(num_datapoints=X.shape[0])
         posterior = prior * likelihood
-        # jitter=0 so the reference matches PTGP's no-jitter Kzz exactly.
+        # Match ptgp's _DEFAULT_JITTER = 1e-6 so the two libraries' Kzz match.
         q = gpx.variational_families.WhitenedVariationalGaussian(
             posterior=posterior,
             inducing_inputs=jnp.array(Z),
             variational_mean=jnp.array(q_mu_val)[:, None],
             variational_root_covariance=jnp.array(q_sqrt_val),
-            jitter=0.0,
+            jitter=1e-6,
         )
         data = gpx.Dataset(X=jnp.array(X), y=jnp.array(y)[:, None])
         return float(gpx.objectives.elbo(q, data))
@@ -280,12 +280,13 @@ class TestSVGPPoissonElboMatchesGPJax:
         prior = gpx.gps.Prior(mean_function=meanf, kernel=kernel)
         likelihood = gpx.likelihoods.Poisson(num_datapoints=X.shape[0])
         posterior = prior * likelihood
+        # Match ptgp's _DEFAULT_JITTER = 1e-6 so the two libraries' Kzz match.
         q = gpx.variational_families.WhitenedVariationalGaussian(
             posterior=posterior,
             inducing_inputs=jnp.array(Z),
             variational_mean=jnp.array(q_mu_val)[:, None],
             variational_root_covariance=jnp.array(q_sqrt_val),
-            jitter=0.0,
+            jitter=1e-6,
         )
         data = gpx.Dataset(X=jnp.array(X), y=jnp.array(y)[:, None])
         return float(gpx.objectives.elbo(q, data))

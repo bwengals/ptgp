@@ -104,9 +104,12 @@ class TestELBO:
         )
         elbo_w = _eval(elbo(svgp_w, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
 
-        # Unwhitened: q_mu=0, q_sqrt=Luu is the prior q(u)=N(0, Kuu)
+        # Unwhitened: q_mu=0, q_sqrt=Luu is the prior q(u)=N(0, Kuu+jit·I)
+        # Jitter Kuu before Cholesky to match base_conditional's internal jitter,
+        # so the unwhitened path's q_sqrt corresponds to the same prior as the
+        # whitened path's identity q_sqrt.
         Kuu = _eval(kernel(Z))
-        Luu = np.linalg.cholesky(Kuu)
+        Luu = np.linalg.cholesky(Kuu + 1e-6 * np.eye(5))
         vp_u = VariationalParams(
             q_mu=pt.zeros(5),
             q_sqrt=pt.assume(pt.as_tensor_variable(Luu), lower_triangular=True),
