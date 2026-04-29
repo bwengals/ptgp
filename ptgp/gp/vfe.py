@@ -25,6 +25,12 @@ class VFE:
 
     def __init__(self, kernel, mean=None, sigma=None, inducing_variable=None):
         """Store the kernel, mean, and inducing variable; build a Gaussian likelihood from sigma."""
+        if not hasattr(inducing_variable, "Z"):
+            raise TypeError(
+                f"VFE requires inducing variables with a .Z attribute "
+                f"(got {type(inducing_variable).__name__}). "
+                f"Use SVGP for structured inducing variables like FourierFeatures1D."
+            )
         self.kernel = kernel
         self.mean = mean if mean is not None else Zero()
         self.likelihood = Gaussian(sigma)

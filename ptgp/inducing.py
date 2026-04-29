@@ -15,13 +15,32 @@ from ptgp.kernels.base import Kernel
 class InducingVariables:
     """Base class for inducing variables.
 
-    Enables dispatch to different implementations for inter-domain,
-    multiscale, or structured inducing points.
+    Subclasses must implement ``num_inducing``, ``K_uu(kernel)``, and
+    ``K_uf(kernel, X)``. The default ``Kuu_solve`` / ``Kuu_sqrt_solve`` /
+    ``Kuu_logdet`` methods materialise ``K_uu`` and call dense linalg;
+    structured subclasses override them with cheaper variants.
     """
 
     @property
     def num_inducing(self):
         raise NotImplementedError
+
+    def K_uu(self, kernel):
+        raise NotImplementedError
+
+    def K_uf(self, kernel, X):
+        raise NotImplementedError
+
+    def Kuu_solve(self, kernel, rhs):
+        return pt.linalg.solve(self.K_uu(kernel), rhs)
+
+    def Kuu_sqrt_solve(self, kernel, rhs):
+        L = pt.linalg.cholesky(self.K_uu(kernel))
+        return pt.linalg.solve(L, rhs)
+
+    def Kuu_logdet(self, kernel):
+        _, ld = pt.linalg.slogdet(self.K_uu(kernel))
+        return ld
 
 
 class Points(InducingVariables):
@@ -39,6 +58,12 @@ class Points(InducingVariables):
     @property
     def num_inducing(self):
         return self.Z.shape[0]
+
+    def K_uu(self, kernel):
+        return kernel(self.Z)
+
+    def K_uf(self, kernel, X):
+        return kernel(self.Z, X)
 
 
 def random_subsample_init(X, M, rng=None):
