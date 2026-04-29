@@ -202,7 +202,8 @@ class TestGreedyVariance:
         ip, _ = greedy_variance_init(X, M, kernel, rng=0)
         greedy_err = _nystrom_residual_trace(X, ip.Z, kernel)
         random_errs = [
-            _nystrom_residual_trace(X, random_subsample_init(X, M, rng=s)[0].Z, kernel) for s in range(10)
+            _nystrom_residual_trace(X, random_subsample_init(X, M, rng=s)[0].Z, kernel)
+            for s in range(10)
         ]
         assert greedy_err < np.mean(random_errs)
 
@@ -254,3 +255,25 @@ class TestIntegrationWithSVGP:
             [], elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).elbo
         )()
         assert np.isfinite(val)
+
+
+def test_points_kuu_solve_matches_dense():
+    from ptgp.kernels.stationary import Matern32
+
+    Z = np.linspace(0, 1, 10)[:, None]
+    p = Points(Z)
+    k = Matern32(input_dim=1, ls=0.3)
+    rhs = pt.as_tensor(np.eye(10))
+    out = p.Kuu_solve(k, rhs).eval()
+    K = k(pt.as_tensor(Z)).eval()
+    np.testing.assert_allclose(out, np.linalg.solve(K, np.eye(10)), atol=1e-6)
+
+
+def test_points_kuu_logdet_matches_dense():
+    from ptgp.kernels.stationary import Matern32
+
+    Z = np.linspace(0, 1, 8)[:, None]
+    p = Points(Z)
+    k = Matern32(input_dim=1, ls=0.3)
+    K = k(pt.as_tensor(Z)).eval()
+    np.testing.assert_allclose(p.Kuu_logdet(k).eval(), np.linalg.slogdet(K)[1], atol=1e-6)
