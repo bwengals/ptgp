@@ -40,6 +40,31 @@ def _build_vff_svgp(num_frequencies=3):
     return model, svgp, q_mu_var, q_sqrt_var, M
 
 
+def _build_vff_svgp_matern52_extrapolating(num_frequencies=3):
+    M = 2 * num_frequencies + 1
+    f = FourierFeatures1D(
+        a=0.0,
+        b=1.0,
+        num_frequencies=num_frequencies,
+        allow_extrapolation=True,
+    )
+    q_mu_var = pt.vector("q_mu")
+    q_sqrt_var = pt.matrix("q_sqrt")
+    with pm.Model() as model:
+        ls = pm.Exponential("ls", lam=1.0)
+        eta = pm.Exponential("eta", lam=1.0)
+        kernel = eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls)
+        svgp = pg.gp.SVGP(
+            kernel=kernel,
+            likelihood=pg.likelihoods.Gaussian(sigma=0.1),
+            inducing_variable=f,
+            whiten=True,
+            q_mu=q_mu_var,
+            q_sqrt=q_sqrt_var,
+        )
+    return model, svgp, q_mu_var, q_sqrt_var, M
+
+
 def test_compile_training_step_preserves_tuple_arity():
     model, svgp, q_mu_var, q_sqrt_var, M = _build_vff_svgp()
     X_var = pt.matrix("X")
@@ -101,6 +126,33 @@ def test_compile_predict_domain_check():
         shared_extras=shared_extras,
     )
     with pytest.raises(ValueError, match="domain"):
+        pred(np.array([[5.0]]))
+
+
+def test_compile_predict_rejects_matern52_extrapolation_even_when_opted_out():
+    model, svgp, q_mu_var, q_sqrt_var, M = _build_vff_svgp_matern52_extrapolating()
+    X_var = pt.matrix("X")
+    y_var = pt.vector("y")
+    _, shared_params, shared_extras = compile_training_step(
+        elbo,
+        svgp,
+        X_var,
+        y_var,
+        model=model,
+        extra_vars=[q_mu_var, q_sqrt_var],
+        extra_init=[np.zeros(M), np.eye(M)],
+        learning_rate=1e-2,
+    )
+    X_new_var = pt.matrix("X_new")
+    pred = compile_predict(
+        svgp,
+        X_new_var,
+        model,
+        shared_params,
+        extra_vars=[q_mu_var, q_sqrt_var],
+        shared_extras=shared_extras,
+    )
+    with pytest.raises(ValueError, match=r"Matern52.*outside"):
         pred(np.array([[5.0]]))
 
 
