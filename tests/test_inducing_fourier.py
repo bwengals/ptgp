@@ -319,7 +319,7 @@ def test_eta_squared_matern32_predictions_finite():
         q_sqrt=pt.as_tensor(q_sqrt),
     )
     X = pt.as_tensor(np.linspace(0.1, 0.9, 20)[:, None])
-    m_s, v_s = [t.eval() for t in svgp_scaled.predict(X)]
+    m_s, v_s = [t.eval() for t in svgp_scaled.predict_marginal(X)]
     assert np.all(np.isfinite(m_s)) and np.all(v_s >= 0)
 
 
@@ -343,6 +343,6 @@ def test_vff_converges_to_exact_gp_sanity():
         inducing_variable=f,
         whiten=True,
     )
-    fmean, fvar = [t.eval() for t in svgp.predict(pt.as_tensor(X))]
+    fmean, fvar = [t.eval() for t in svgp.predict_marginal(pt.as_tensor(X))]
     assert np.all(np.isfinite(fmean))
     assert np.all(fvar >= 0)
