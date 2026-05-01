@@ -42,7 +42,7 @@ def test_whitened_path_uses_sqrt_solve(monkeypatch):
     monkeypatch.setattr(FourierFeatures1D, "Kuu_solve", forbid("solve"))
 
     svgp = _make(whiten=True)
-    _ = svgp.predict(pt.matrix("_X"))
+    _ = svgp.predict_marginal(pt.matrix("_X"))
     _ = svgp.prior_kl()
     assert counts["sqrt"] >= 1
     assert counts["K_uu"] == 0 and counts["solve"] == 0
@@ -75,7 +75,7 @@ def test_unwhitened_path_uses_solve_and_logdet(monkeypatch):
     monkeypatch.setattr(FourierFeatures1D, "Kuu_logdet", logdet_spy)
 
     svgp = _make(whiten=False)
-    _ = svgp.predict(pt.matrix("_X"))
+    _ = svgp.predict_marginal(pt.matrix("_X"))
     _ = svgp.prior_kl()
     assert counts["solve"] >= 1 and counts["logdet"] >= 1
     assert counts["K_uu"] == 0 and counts["sqrt"] == 0
@@ -86,7 +86,7 @@ def test_no_dense_cholesky_on_Kuu():
     svgp = _make(whiten=True, num_frequencies=12)
     N = 50
     X_sym = pt.tensor("_X", shape=(N, 1), dtype="float64")
-    fmean, fvar = svgp.predict(X_sym)
+    fmean, fvar = svgp.predict_marginal(X_sym)
     fn = pytensor.function([X_sym], [fmean, fvar])
 
     M = f.num_inducing
@@ -138,8 +138,8 @@ def test_whitened_vs_unwhitened_agreement(kind):
     )
 
     X_test = np.linspace(f.a + 0.05, f.b - 0.05, 30)[:, None]
-    m_u_out, v_u_out = [t.eval() for t in svgp_u.predict(pt.as_tensor(X_test))]
-    m_w_out, v_w_out = [t.eval() for t in svgp_w.predict(pt.as_tensor(X_test))]
+    m_u_out, v_u_out = [t.eval() for t in svgp_u.predict_marginal(pt.as_tensor(X_test))]
+    m_w_out, v_w_out = [t.eval() for t in svgp_w.predict_marginal(pt.as_tensor(X_test))]
     np.testing.assert_allclose(m_u_out, m_w_out, atol=1e-6)
     np.testing.assert_allclose(v_u_out, v_w_out, atol=1e-6)
 
