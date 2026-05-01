@@ -82,20 +82,31 @@ class FourierFeatures1D(InducingVariables):
         )
 
     def _resolve_scaled_matern(self, kernel):
-        """Recursively unwrap (scalar*…)*Matern{12,32,52} into (scale_tensor, base)."""
-        from ptgp.kernels.combination import ProductKernel
+        """Recursively unwrap scalar products around a single Matern leaf.
+
+        FourierFeatures1D follows the raw VFF feature convention
+        ``u = P_phi(f)`` used by Hensman, Durrande, and Solin. Scalar kernel
+        variance affects ``Kuu`` as ``Kuu / scale`` and does not scale ``Kuf``.
+        """
+        from ptgp.kernels.combination import ProductKernel, SumKernel
         from ptgp.kernels.stationary import Matern12, Matern32, Matern52
 
         supported = (Matern12, Matern32, Matern52)
 
         def walk(node):
+            if isinstance(node, SumKernel):
+                raise NotImplementedError(
+                    "FourierFeatures1D does not implement additive VFF. "
+                    "Use a single scalar-scaled 1D Matern kernel."
+                )
             if isinstance(node, ProductKernel):
                 s1, b1 = walk(node.k1)
                 s2, b2 = walk(node.k2)
                 if b1 is not None and b2 is not None:
                     raise NotImplementedError(
-                        f"FourierFeatures1D cannot factor a product of two kernels "
-                        f"({type(b1).__name__} * {type(b2).__name__})."
+                        "FourierFeatures1D does not implement separable/product VFF "
+                        f"({type(b1).__name__} * {type(b2).__name__}). "
+                        "Use a single scalar-scaled 1D Matern kernel."
                     )
                 return s1 * s2, (b1 if b1 is not None else b2)
             if isinstance(node, Kernel):
@@ -119,9 +130,11 @@ class FourierFeatures1D(InducingVariables):
 
         Operates on a **unit-variance** Matern{12,32,52} ``base_kernel``; any
         amplitude prefactor is expected to have been peeled off by
-        :meth:`_resolve_scaled_matern`. Uses block ordering (cos block then sin
-        block, omega_0 sine row dropped). See Hensman et al. 2017 App. A and
-        the st--/VFF reference.
+        :meth:`_resolve_scaled_matern`. The scaled wrapper divides this
+        unit-variance structure by the amplitude scale, matching the authors'
+        raw feature convention. Uses block ordering (cos block then sin block,
+        omega_0 sine row dropped). See Hensman et al. 2017 App. A and the
+        st--/VFF reference.
 
         Returns
         -------
@@ -133,7 +146,6 @@ class FourierFeatures1D(InducingVariables):
 
         a, b = self.a, self.b
         K = self.num_frequencies
-        M = 2 * K + 1
         omegas = 2.0 * np.pi * np.arange(K + 1) / (b - a)  # length K+1
         omegas_sin = omegas[1:]  # drop omega_0 = 0
         ls = base_kernel.ls
@@ -201,8 +213,10 @@ class FourierFeatures1D(InducingVariables):
         )
 
     def _structured_Kuu(self, kernel):
-        """Return ``(d, U)`` for ``Kuu(kernel) = diag(d) + U @ U.T`` with scale propagated.
+        """Return ``(d, U)`` for ``Kuu(kernel) = diag(d) + U @ U.T``.
 
+        Scalar kernel amplitude follows the st--/VFF convention:
+        ``Kuu(scale * base) = Kuu(base) / scale`` while ``Kuf`` is unscaled.
         Validates ``num_inducing > R`` for the unwrapped Matern kernel.
         """
         scale, base = self._resolve_scaled_matern(kernel)
@@ -216,7 +230,7 @@ class FourierFeatures1D(InducingVariables):
             )
         d_base, U_base = self._structured_Kuu_base(base)
         sqrt_scale = pt.sqrt(scale)
-        return scale * d_base, sqrt_scale * U_base
+        return d_base / scale, U_base / sqrt_scale
 
     def K_uu(self, kernel):
         """Dense ``Kuu`` via ``diag(d) + U @ U.T`` for compatibility with the base API."""
@@ -225,9 +239,9 @@ class FourierFeatures1D(InducingVariables):
         return pt.specify_assumptions(K, symmetric=True, positive_definite=True)
 
     def _domain_check(self, X_numeric, kernel):
-        """Raise if ``X[:, active_dim]`` falls outside ``[a, b]``. No-op when extrapolating."""
-        if self.allow_extrapolation:
-            return
+        """Raise when numeric inputs use unsupported out-of-domain VFF behavior."""
+        from ptgp.kernels.stationary import Matern52
+
         _, base = self._resolve_scaled_matern(kernel)
         if len(base.active_dims) != 1:
             raise ValueError(
@@ -238,7 +252,16 @@ class FourierFeatures1D(InducingVariables):
         X = np.asarray(X_numeric)
         col = X[:, col_idx]
         lo, hi = float(col.min()), float(col.max())
-        if lo < self.a or hi > self.b:
+        outside = lo < self.a or hi > self.b
+        if not outside:
+            return
+        if isinstance(base, Matern52):
+            raise ValueError(
+                f"FourierFeatures1D does not support Matern52 extrapolation outside "
+                f"domain [{self.a}, {self.b}] (got [{lo}, {hi}]). Reconstruct with "
+                f"wider (a, b) or use FourierFeatures1D.from_data(X, ...)."
+            )
+        if not self.allow_extrapolation:
             raise ValueError(
                 f"X[:, {col_idx}] (column {col_idx}) has entries outside FourierFeatures1D "
                 f"domain [{self.a}, {self.b}] (got [{lo}, {hi}]). Either re-construct with "
@@ -257,11 +280,15 @@ class FourierFeatures1D(InducingVariables):
         return X[:, col]
 
     def _K_uf_base(self, base_kernel, x):
-        """Fourier basis evaluation for unit-variance Matern. Returns ``(M, N)``.
+        """Fourier feature covariance for unit-variance Matern. Returns ``(M, N)``.
 
         Block ordering: rows ``[cos(omega_k*(x-a)) for k=0..K, sin(omega_k*(x-a)) for k=1..K]``.
-        Assumes ``x in [a, b]``; out-of-domain handling is the domain wrapper's job.
+        For Matern12/32, out-of-domain rows use the edge covariances from the
+        authors' implementation. Matern52 edge covariances are not implemented
+        in the reference and are rejected by the numeric domain wrapper.
         """
+        from ptgp.kernels.stationary import Matern12, Matern32
+
         a, b = self.a, self.b
         K = self.num_frequencies
         omegas = 2.0 * np.pi * np.arange(K + 1) / (b - a)  # length K+1
@@ -271,12 +298,45 @@ class FourierFeatures1D(InducingVariables):
         cos_block = pt.cos(pt.as_tensor(omegas)[:, None] * shifted[None, :])
         # sin block: shape (K, N)
         sin_block = pt.sin(pt.as_tensor(omegas_sin)[:, None] * shifted[None, :])
+        lt_a = x < a
+        gt_b = x > b
+
+        if isinstance(base_kernel, Matern12):
+            left_cos = pt.exp(-pt.abs(x - a) / base_kernel.ls)
+            right_cos = pt.exp(-pt.abs(x - b) / base_kernel.ls)
+            cos_block = pt.switch(lt_a[None, :], left_cos[None, :], cos_block)
+            cos_block = pt.switch(gt_b[None, :], right_cos[None, :], cos_block)
+            sin_block = pt.switch(
+                (lt_a | gt_b)[None, :],
+                pt.zeros_like(sin_block),
+                sin_block,
+            )
+            return pt.concatenate([cos_block, sin_block], axis=0)
+
+        if isinstance(base_kernel, Matern32):
+            sqrt3 = np.sqrt(3.0)
+            arg_left = sqrt3 * pt.abs(x - a) / base_kernel.ls
+            arg_right = sqrt3 * pt.abs(x - b) / base_kernel.ls
+            left_exp = pt.exp(-arg_left)
+            right_exp = pt.exp(-arg_right)
+            left_cos = (1.0 + arg_left) * left_exp
+            right_cos = (1.0 + arg_right) * right_exp
+            cos_block = pt.switch(lt_a[None, :], left_cos[None, :], cos_block)
+            cos_block = pt.switch(gt_b[None, :], right_cos[None, :], cos_block)
+
+            omega_sin_tensor = pt.as_tensor(omegas_sin)[:, None]
+            left_sin = (x - a)[None, :] * left_exp[None, :] * omega_sin_tensor
+            right_sin = (x - b)[None, :] * right_exp[None, :] * omega_sin_tensor
+            sin_block = pt.switch(lt_a[None, :], left_sin, sin_block)
+            sin_block = pt.switch(gt_b[None, :], right_sin, sin_block)
+            return pt.concatenate([cos_block, sin_block], axis=0)
+
         return pt.concatenate([cos_block, sin_block], axis=0)
 
     def K_uf(self, kernel, X):
-        scale, base = self._resolve_scaled_matern(kernel)
+        _, base = self._resolve_scaled_matern(kernel)
         x = self._get_active_column(kernel, X)
-        return scale * self._K_uf_base(base, x)
+        return self._K_uf_base(base, x)
 
     def Kuu_solve(self, kernel, rhs):
         """``Kuu^{-1} @ rhs`` via the Woodbury identity. ``rhs`` must be ``(M, K)``."""

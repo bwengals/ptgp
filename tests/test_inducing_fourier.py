@@ -77,8 +77,15 @@ def test_resolve_rejects_non_matern():
 def test_resolve_rejects_two_kernel_product():
     f = FourierFeatures1D(0, 1, num_frequencies=4)
     k = Matern12(input_dim=1, ls=1.0) * Matern32(input_dim=1, ls=1.0)
-    with pytest.raises(NotImplementedError, match="product of two"):
+    with pytest.raises(NotImplementedError, match="separable/product VFF"):
         f._resolve_scaled_matern(k)
+
+
+def test_resolve_rejects_sum_kernel_as_additive_vff():
+    f = FourierFeatures1D(0, 1, num_frequencies=4)
+    k = Matern12(input_dim=1, ls=1.0) + Matern32(input_dim=1, ls=1.0)
+    with pytest.raises(NotImplementedError, match="additive VFF"):
+        f.K_uf(k, pt.as_tensor(np.array([[0.5]])))
 
 
 def test_structured_kuu_base_shapes():
@@ -129,33 +136,33 @@ def test_structured_Kuu_rank_deficient_guard(kernel_cls, bad_K):
         f._structured_Kuu(kernel_cls(input_dim=1, ls=1.0))
 
 
-def test_Kuu_scale_propagation():
+def test_Kuu_reference_scale_convention():
     f = FourierFeatures1D(0, 1, num_frequencies=8)
     base = Matern32(input_dim=1, ls=0.5)
     eta = pt.as_tensor(2.0)
     K_scaled = f.K_uu(eta**2 * base).eval()
     K_base = f.K_uu(base).eval()
-    np.testing.assert_allclose(K_scaled, 4.0 * K_base, atol=1e-10)
+    np.testing.assert_allclose(K_scaled, K_base / 4.0, atol=1e-10)
 
 
-def test_Kuu_matches_oracle_with_scale():
-    """K_uu(eta**2 * Matern) matches eta**2 * oracle (scale + structured)."""
+def test_Kuu_matches_oracle_with_reference_scale():
+    """K_uu(eta**2 * Matern) matches oracle / eta**2."""
     f = FourierFeatures1D(a=-0.5, b=1.5, num_frequencies=10)
     base = Matern32(input_dim=1, ls=0.3)
     eta = pt.as_tensor(1.5)
     K = f.K_uu(eta**2 * base).eval()
-    K_oracle = (1.5**2) * oracle_kuu_matern32(a=-0.5, b=1.5, ms=np.arange(11), ls=0.3)
+    K_oracle = oracle_kuu_matern32(a=-0.5, b=1.5, ms=np.arange(11), ls=0.3) / (1.5**2)
     np.testing.assert_allclose(K, K_oracle, atol=1e-10)
 
 
-def test_Kuf_shape_and_scale():
+def test_Kuf_shape_and_reference_scale_convention():
     f = FourierFeatures1D(0, 1, num_frequencies=4)
     k = Matern32(input_dim=1, ls=0.5)
     X = pt.as_tensor(np.linspace(0.1, 0.9, 7)[:, None])
     Kuf_base = f.K_uf(k, X).eval()
     Kuf_scaled = f.K_uf(2.0 * k, X).eval()
     assert Kuf_base.shape == (9, 7)
-    np.testing.assert_allclose(Kuf_scaled, 2.0 * Kuf_base, atol=1e-10)
+    np.testing.assert_allclose(Kuf_scaled, Kuf_base, atol=1e-10)
 
 
 def test_Kuf_active_dims():
@@ -175,6 +182,47 @@ def test_Kuf_matches_oracle_no_edges():
     Kuf = f.K_uf(k, X).eval()
     Kuf_oracle = oracle_kuf_no_edges(a=-0.5, b=1.5, ms=np.arange(11), X=X_np)
     np.testing.assert_allclose(Kuf, Kuf_oracle, atol=1e-12)
+
+
+def test_Kuf_matern12_reference_edges():
+    f = FourierFeatures1D(a=0.0, b=1.0, num_frequencies=3, allow_extrapolation=True)
+    k = Matern12(input_dim=1, ls=0.5)
+    X_np = np.array([[-0.2], [0.25], [1.3]])
+    Kuf = f.K_uf(k, pt.as_tensor(X_np)).eval()
+
+    omegas = 2.0 * np.pi * np.arange(4) / (f.b - f.a)
+    interior = np.cos(omegas * (0.25 - f.a))
+    left_edge = np.exp(-abs(-0.2 - f.a) / 0.5)
+    right_edge = np.exp(-abs(1.3 - f.b) / 0.5)
+    np.testing.assert_allclose(Kuf[:4, 0], left_edge, atol=1e-12)
+    np.testing.assert_allclose(Kuf[:4, 1], interior, atol=1e-12)
+    np.testing.assert_allclose(Kuf[:4, 2], right_edge, atol=1e-12)
+    np.testing.assert_allclose(Kuf[4:, [0, 2]], 0.0, atol=1e-12)
+
+
+def test_Kuf_matern32_reference_edges():
+    f = FourierFeatures1D(a=0.0, b=1.0, num_frequencies=3, allow_extrapolation=True)
+    k = Matern32(input_dim=1, ls=0.5)
+    X_np = np.array([[-0.2], [0.25], [1.3]])
+    Kuf = f.K_uf(k, pt.as_tensor(X_np)).eval()
+
+    omegas = 2.0 * np.pi * np.arange(4) / (f.b - f.a)
+    omegas_sin = omegas[1:]
+    interior_cos = np.cos(omegas * (0.25 - f.a))
+    interior_sin = np.sin(omegas_sin * (0.25 - f.a))
+    arg_left = np.sqrt(3.0) * abs(-0.2 - f.a) / 0.5
+    arg_right = np.sqrt(3.0) * abs(1.3 - f.b) / 0.5
+    left_cos = (1.0 + arg_left) * np.exp(-arg_left)
+    right_cos = (1.0 + arg_right) * np.exp(-arg_right)
+    left_sin = (-0.2 - f.a) * np.exp(-arg_left) * omegas_sin
+    right_sin = (1.3 - f.b) * np.exp(-arg_right) * omegas_sin
+
+    np.testing.assert_allclose(Kuf[:4, 0], left_cos, atol=1e-12)
+    np.testing.assert_allclose(Kuf[:4, 1], interior_cos, atol=1e-12)
+    np.testing.assert_allclose(Kuf[:4, 2], right_cos, atol=1e-12)
+    np.testing.assert_allclose(Kuf[4:, 0], left_sin, atol=1e-12)
+    np.testing.assert_allclose(Kuf[4:, 1], interior_sin, atol=1e-12)
+    np.testing.assert_allclose(Kuf[4:, 2], right_sin, atol=1e-12)
 
 
 def test_Kuf_rejects_multi_active_dim():
@@ -275,6 +323,13 @@ def test_domain_check_opt_out():
     f = FourierFeatures1D(0, 1, num_frequencies=4, allow_extrapolation=True)
     k = Matern32(input_dim=1, ls=0.5)
     f._domain_check(np.array([[10.0]]), k)
+
+
+def test_domain_check_rejects_matern52_extrapolation_even_when_opted_out():
+    f = FourierFeatures1D(0, 1, num_frequencies=4, allow_extrapolation=True)
+    k = Matern52(input_dim=1, ls=0.5)
+    with pytest.raises(ValueError, match=r"Matern52.*outside"):
+        f._domain_check(np.array([[10.0]]), k)
 
 
 def test_Kuu_sqrt_solve_finite_at_small_lambda():
