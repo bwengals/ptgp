@@ -8,8 +8,10 @@ from ptgp import (
     optim,
     rewrites,  # noqa: F401  (registers PyTensor rewrites at import)
 )
+from ptgp.inducing_fourier import FourierFeatures1D
 
 __all__ = [
+    "FourierFeatures1D",
     "gp",
     "inducing",
     "kernels",

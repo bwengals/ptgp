@@ -2,9 +2,12 @@ import numpy as np
 import pytensor.tensor as pt
 import pytest
 
+from ptgp.gp.svgp import SVGP
 from ptgp.inducing_fourier import FourierFeatures1D
 from ptgp.kernels.stationary import ExpQuad, Matern12, Matern32, Matern52
+from ptgp.likelihoods.gaussian import Gaussian
 from tests._fixtures.vff_kuu_oracle import (
+    oracle_kuf_no_edges,
     oracle_kuu_matern12,
     oracle_kuu_matern32,
     oracle_kuu_matern52,
@@ -113,3 +116,233 @@ def test_structured_kuu_base_matches_oracle_matern52():
     Kuu_struct = np.diag(d) + U @ U.T
     Kuu_oracle = oracle_kuu_matern52(a=-0.5, b=1.5, ms=np.arange(11), ls=0.3)
     np.testing.assert_allclose(Kuu_struct, Kuu_oracle, atol=1e-10)
+
+
+@pytest.mark.parametrize(
+    "kernel_cls,bad_K",
+    [(Matern32, 2), (Matern52, 3)],
+)
+def test_structured_Kuu_rank_deficient_guard(kernel_cls, bad_K):
+    """num_inducing must exceed R; raise with a clear message otherwise."""
+    f = FourierFeatures1D(0, 1, num_frequencies=bad_K - 1)
+    with pytest.raises(ValueError, match="num_frequencies"):
+        f._structured_Kuu(kernel_cls(input_dim=1, ls=1.0))
+
+
+def test_Kuu_scale_propagation():
+    f = FourierFeatures1D(0, 1, num_frequencies=8)
+    base = Matern32(input_dim=1, ls=0.5)
+    eta = pt.as_tensor(2.0)
+    K_scaled = f.K_uu(eta**2 * base).eval()
+    K_base = f.K_uu(base).eval()
+    np.testing.assert_allclose(K_scaled, 4.0 * K_base, atol=1e-10)
+
+
+def test_Kuu_matches_oracle_with_scale():
+    """K_uu(eta**2 * Matern) matches eta**2 * oracle (scale + structured)."""
+    f = FourierFeatures1D(a=-0.5, b=1.5, num_frequencies=10)
+    base = Matern32(input_dim=1, ls=0.3)
+    eta = pt.as_tensor(1.5)
+    K = f.K_uu(eta**2 * base).eval()
+    K_oracle = (1.5**2) * oracle_kuu_matern32(a=-0.5, b=1.5, ms=np.arange(11), ls=0.3)
+    np.testing.assert_allclose(K, K_oracle, atol=1e-10)
+
+
+def test_Kuf_shape_and_scale():
+    f = FourierFeatures1D(0, 1, num_frequencies=4)
+    k = Matern32(input_dim=1, ls=0.5)
+    X = pt.as_tensor(np.linspace(0.1, 0.9, 7)[:, None])
+    Kuf_base = f.K_uf(k, X).eval()
+    Kuf_scaled = f.K_uf(2.0 * k, X).eval()
+    assert Kuf_base.shape == (9, 7)
+    np.testing.assert_allclose(Kuf_scaled, 2.0 * Kuf_base, atol=1e-10)
+
+
+def test_Kuf_active_dims():
+    f = FourierFeatures1D(0, 1, num_frequencies=4)
+    k = Matern32(input_dim=2, active_dims=[1], ls=0.5)
+    X = pt.as_tensor(np.column_stack([np.linspace(5, 10, 5), np.linspace(0.1, 0.9, 5)]))
+    Kuf = f.K_uf(k, X).eval()
+    assert Kuf.shape == (9, 5)
+
+
+def test_Kuf_matches_oracle_no_edges():
+    """K_uf on the interior matches the no-edges basis evaluation."""
+    f = FourierFeatures1D(a=-0.5, b=1.5, num_frequencies=10)
+    k = Matern32(input_dim=1, ls=0.3)
+    X_np = np.linspace(0.0, 1.0, 13)[:, None]
+    X = pt.as_tensor(X_np)
+    Kuf = f.K_uf(k, X).eval()
+    Kuf_oracle = oracle_kuf_no_edges(a=-0.5, b=1.5, ms=np.arange(11), X=X_np)
+    np.testing.assert_allclose(Kuf, Kuf_oracle, atol=1e-12)
+
+
+def test_Kuf_rejects_multi_active_dim():
+    f = FourierFeatures1D(0, 1, num_frequencies=4)
+    k = Matern32(input_dim=2, active_dims=[0, 1], ls=0.5)
+    X = pt.as_tensor(np.zeros((3, 2)))
+    with pytest.raises(ValueError, match="active_dims"):
+        f.K_uf(k, X)
+
+
+def test_Kuu_solve_matches_dense():
+    f = FourierFeatures1D(0, 1, num_frequencies=8)
+    k = 1.5 * Matern32(input_dim=1, ls=0.4)
+    rhs_np = np.random.default_rng(0).standard_normal((17, 3))
+    out = f.Kuu_solve(k, pt.as_tensor(rhs_np)).eval()
+    K = f.K_uu(k).eval()
+    np.testing.assert_allclose(out, np.linalg.solve(K, rhs_np), atol=1e-6)
+
+
+def test_Kuu_logdet_matches_dense():
+    f = FourierFeatures1D(0, 1, num_frequencies=8)
+    k = 1.5 * Matern52(input_dim=1, ls=0.4)
+    K = f.K_uu(k).eval()
+    np.testing.assert_allclose(f.Kuu_logdet(k).eval(), np.linalg.slogdet(K)[1], atol=1e-6)
+
+
+def test_Kuu_sqrt_solve_R_inv_identity():
+    """R_inv @ Kuu @ R_inv.T = I."""
+    f = FourierFeatures1D(0, 1, num_frequencies=8)
+    k = 1.0 * Matern32(input_dim=1, ls=0.5)
+    M = f.num_inducing
+    R_inv = f.Kuu_sqrt_solve(k, pt.as_tensor(np.eye(M))).eval()
+    K = f.K_uu(k).eval()
+    np.testing.assert_allclose(R_inv @ K @ R_inv.T, np.eye(M), atol=1e-6)
+
+
+def test_Kuu_sqrt_solve_quadratic_form():
+    """rhs.T @ R_inv.T @ R_inv @ rhs = rhs.T @ Kuu^{-1} @ rhs."""
+    f = FourierFeatures1D(0, 1, num_frequencies=8)
+    k = 1.0 * Matern52(input_dim=1, ls=0.3)
+    rhs = np.random.default_rng(0).standard_normal((f.num_inducing, 4))
+    R_inv_rhs = f.Kuu_sqrt_solve(k, pt.as_tensor(rhs)).eval()
+    K = f.K_uu(k).eval()
+    np.testing.assert_allclose(R_inv_rhs.T @ R_inv_rhs, rhs.T @ np.linalg.solve(K, rhs), atol=1e-6)
+
+
+def test_domain_check_uses_active_column():
+    f = FourierFeatures1D(0, 1, num_frequencies=4)
+    k = Matern32(input_dim=2, active_dims=[1], ls=0.5)
+    X_ok = np.column_stack([np.array([5.0, 10.0]), np.array([0.2, 0.8])])
+    f._domain_check(X_ok, k)
+    X_bad = np.column_stack([np.array([0.1, 0.2]), np.array([0.5, 1.5])])
+    with pytest.raises(ValueError, match=r"column 1|X\[:, 1\]"):
+        f._domain_check(X_bad, k)
+
+
+def test_wrap_helper_validates_at_input_index():
+    from ptgp.inducing_fourier import _maybe_wrap_with_domain_check
+
+    f = FourierFeatures1D(0, 1, num_frequencies=4)
+    k = Matern32(input_dim=1, ls=0.5)
+
+    class _Model:
+        pass
+
+    m = _Model()
+    m.inducing_variable = f
+    m.kernel = k
+
+    def fn(theta, X, y):
+        return float(theta[0])
+
+    wrapped = _maybe_wrap_with_domain_check(fn, m, input_index=1)
+
+    assert wrapped(np.zeros(3), np.array([[0.5]]), np.zeros(1)) == 0.0
+    with pytest.raises(ValueError):
+        wrapped(np.zeros(3), np.array([[5.0]]), np.zeros(1))
+    assert wrapped(np.array([42.0, 99.0]), np.array([[0.5]]), np.zeros(1)) == 42.0
+
+
+def test_wrap_helper_noop_for_non_vff():
+    from ptgp.inducing_fourier import _maybe_wrap_with_domain_check
+
+    class _Model:
+        pass
+
+    m = _Model()
+    m.inducing_variable = None
+    m.kernel = None
+
+    def fn(x):
+        return x
+
+    assert _maybe_wrap_with_domain_check(fn, m, input_index=0) is fn
+
+
+def test_domain_check_opt_out():
+    f = FourierFeatures1D(0, 1, num_frequencies=4, allow_extrapolation=True)
+    k = Matern32(input_dim=1, ls=0.5)
+    f._domain_check(np.array([[10.0]]), k)
+
+
+def test_Kuu_sqrt_solve_finite_at_small_lambda():
+    """Long ls vs domain forces small Gram eigenvalues; delta must stay finite."""
+    f = FourierFeatures1D(0, 1, num_frequencies=15)
+    k = 1.0 * Matern32(input_dim=1, ls=10.0)
+    M = f.num_inducing
+    R_inv = f.Kuu_sqrt_solve(k, pt.as_tensor(np.eye(M))).eval()
+    assert np.all(np.isfinite(R_inv))
+    K = f.K_uu(k).eval()
+    np.testing.assert_allclose(R_inv @ K @ R_inv.T, np.eye(M), atol=1e-5)
+
+
+def test_gauss_kl_structured_scalar_for_vff():
+    f = FourierFeatures1D(0, 1, num_frequencies=8)
+    k = 1.0 * Matern32(input_dim=1, ls=0.4)
+    svgp = SVGP(
+        kernel=k,
+        likelihood=Gaussian(sigma=0.1),
+        inducing_variable=f,
+        whiten=False,
+    )
+    out = svgp.prior_kl().eval()
+    assert out.ndim == 0 and np.isfinite(out)
+
+
+def test_eta_squared_matern32_predictions_finite():
+    f = FourierFeatures1D(0, 1, num_frequencies=8)
+    base = Matern32(input_dim=1, ls=0.4)
+    eta = pt.as_tensor(2.0)
+
+    rng = np.random.default_rng(0)
+    M = f.num_inducing
+    q_mu = rng.standard_normal(M)
+    q_sqrt = np.eye(M)
+    svgp_scaled = SVGP(
+        kernel=eta**2 * base,
+        likelihood=Gaussian(sigma=0.1),
+        inducing_variable=f,
+        whiten=True,
+        q_mu=pt.as_tensor(q_mu),
+        q_sqrt=pt.as_tensor(q_sqrt),
+    )
+    X = pt.as_tensor(np.linspace(0.1, 0.9, 20)[:, None])
+    m_s, v_s = [t.eval() for t in svgp_scaled.predict(X)]
+    assert np.all(np.isfinite(m_s)) and np.all(v_s >= 0)
+
+
+def test_rank_deficient_matern52_raises():
+    f = FourierFeatures1D(0, 1, num_frequencies=2)  # M=5, R=6 for Matern52 → fail
+    with pytest.raises(ValueError, match="num_frequencies >= 3"):
+        f._structured_Kuu(Matern52(input_dim=1, ls=0.5))
+
+
+def test_vff_converges_to_exact_gp_sanity():
+    rng = np.random.default_rng(0)
+    N = 200
+    X = np.sort(rng.uniform(0, 1, N))[:, None]
+    _ = np.sin(2 * np.pi * X[:, 0]) + 0.05 * rng.standard_normal(N)
+
+    f = FourierFeatures1D.from_data(X, num_frequencies=64, buffer=0.2)
+    k = 1.0 * Matern32(input_dim=1, ls=0.2)
+    svgp = SVGP(
+        kernel=k,
+        likelihood=Gaussian(sigma=0.05),
+        inducing_variable=f,
+        whiten=True,
+    )
+    fmean, fvar = [t.eval() for t in svgp.predict(pt.as_tensor(X))]
+    assert np.all(np.isfinite(fmean))
+    assert np.all(fvar >= 0)

@@ -184,8 +184,7 @@ def compile_training_step(
             for var in group:
                 if var not in sym_to_shared:
                     raise ValueError(
-                        f"param_groups[{name!r}] contains unknown variable "
-                        f"{var.name or repr(var)}"
+                        f"param_groups[{name!r}] contains unknown variable {var.name or repr(var)}"
                     )
                 resolved.append(sym_to_shared[var])
             resolved_groups[name] = resolved
@@ -213,6 +212,9 @@ def compile_training_step(
         updates={**updates, **extra_updates},
         **compile_kwargs,
     )
+    from ptgp.inducing_fourier import _maybe_wrap_with_domain_check
+
+    train_step = _maybe_wrap_with_domain_check(train_step, gp_model, input_index=0)
     return train_step, shared_params, shared_extras
 
 
@@ -310,7 +312,9 @@ def compile_scipy_objective(
     model = pm.modelcontext(model)
 
     shared_params, shared_extras, _ = _make_shared_params(
-        model, extra_vars, extra_init,
+        model,
+        extra_vars,
+        extra_init,
     )
 
     value_vars_ordered = list(model.continuous_value_vars)
@@ -332,7 +336,7 @@ def compile_scipy_objective(
     pieces = []
     offset = 0
     for _, shape, size in layout:
-        pieces.append(theta_var[offset:offset + size].reshape(shape))
+        pieces.append(theta_var[offset : offset + size].reshape(shape))
         offset += size
 
     loss = -objective_fn(gp_model, X_var, y_var)
@@ -359,13 +363,16 @@ def compile_scipy_objective(
         [loss_replaced, flat_grad],
         **(compile_kwargs or {}),
     )
+    from ptgp.inducing_fourier import _maybe_wrap_with_domain_check
+
+    fun = _maybe_wrap_with_domain_check(fun, gp_model, input_index=1)
 
     def unpack_to_shared(theta):
         """Write ``theta`` into the captured shared vars for prediction."""
         theta = np.asarray(theta, dtype=np.float64)
         offset = 0
         for sv, shape, size in layout:
-            sv.set_value(theta[offset:offset + size].reshape(shape))
+            sv.set_value(theta[offset : offset + size].reshape(shape))
             offset += size
 
     return fun, theta0, unpack_to_shared, shared_params, shared_extras
@@ -461,4 +468,7 @@ def compile_predict(
         shared_extras,
     )
 
-    return pytensor.function([X_new_var], [mean_s, var_s], **(compile_kwargs or {}))
+    predict_fn = pytensor.function([X_new_var], [mean_s, var_s], **(compile_kwargs or {}))
+    from ptgp.inducing_fourier import _maybe_wrap_with_domain_check
+
+    return _maybe_wrap_with_domain_check(predict_fn, gp_model, input_index=0)
