@@ -13,6 +13,29 @@ from ptgp.kernels.base import Kernel
 # This ordering must be matched by Kuf (Task 13) and any downstream consumer.
 
 
+_R_BY_KERNEL = {"Matern12": 2, "Matern32": 4, "Matern52": 6}
+
+
+def _maybe_wrap_with_domain_check(step_fn, gp_model, *, input_index):
+    """Wrap ``step_fn`` so its positional arg at ``input_index`` is validated as ``X``.
+
+    Returns ``step_fn`` unchanged when the model's inducing variable does not
+    expose ``_domain_check`` (i.e. for stock SVGP / VFE).
+    """
+    ind = getattr(gp_model, "inducing_variable", None)
+    if ind is None or not hasattr(ind, "_domain_check"):
+        return step_fn
+    kernel = gp_model.kernel
+
+    def wrapped(*args, **kwargs):
+        if len(args) > input_index:
+            ind._domain_check(args[input_index], kernel)
+        return step_fn(*args, **kwargs)
+
+    wrapped.__wrapped__ = step_fn
+    return wrapped
+
+
 class FourierFeatures1D(InducingVariables):
     """1D Variational Fourier Features for Matern-1/2, 3/2, 5/2.
 
@@ -176,3 +199,121 @@ class FourierFeatures1D(InducingVariables):
         raise NotImplementedError(
             f"_structured_Kuu_base supports Matern12/32/52 only; got {type(base_kernel).__name__}."
         )
+
+    def _structured_Kuu(self, kernel):
+        """Return ``(d, U)`` for ``Kuu(kernel) = diag(d) + U @ U.T`` with scale propagated.
+
+        Validates ``num_inducing > R`` for the unwrapped Matern kernel.
+        """
+        scale, base = self._resolve_scaled_matern(kernel)
+        R = _R_BY_KERNEL[type(base).__name__]
+        if self.num_inducing <= R:
+            min_freq = (R + 1) // 2
+            raise ValueError(
+                f"FourierFeatures1D requires num_inducing > R "
+                f"(got M={self.num_inducing}, R={R} for {type(base).__name__}). "
+                f"Use num_frequencies >= {min_freq} for {type(base).__name__}."
+            )
+        d_base, U_base = self._structured_Kuu_base(base)
+        sqrt_scale = pt.sqrt(scale)
+        return scale * d_base, sqrt_scale * U_base
+
+    def K_uu(self, kernel):
+        """Dense ``Kuu`` via ``diag(d) + U @ U.T`` for compatibility with the base API."""
+        d, U = self._structured_Kuu(kernel)
+        K = pt.diag(d) + U @ U.T
+        return pt.specify_assumptions(K, symmetric=True, positive_definite=True)
+
+    def _domain_check(self, X_numeric, kernel):
+        """Raise if ``X[:, active_dim]`` falls outside ``[a, b]``. No-op when extrapolating."""
+        if self.allow_extrapolation:
+            return
+        _, base = self._resolve_scaled_matern(kernel)
+        if len(base.active_dims) != 1:
+            raise ValueError(
+                f"FourierFeatures1D requires a 1D kernel (len(active_dims)==1); "
+                f"got active_dims={list(base.active_dims)}."
+            )
+        col_idx = int(base.active_dims[0])
+        X = np.asarray(X_numeric)
+        col = X[:, col_idx]
+        lo, hi = float(col.min()), float(col.max())
+        if lo < self.a or hi > self.b:
+            raise ValueError(
+                f"X[:, {col_idx}] (column {col_idx}) has entries outside FourierFeatures1D "
+                f"domain [{self.a}, {self.b}] (got [{lo}, {hi}]). Either re-construct with "
+                f"wider (a, b), use FourierFeatures1D.from_data(X, ...), or pass "
+                f"allow_extrapolation=True."
+            )
+
+    def _get_active_column(self, kernel, X):
+        _, base = self._resolve_scaled_matern(kernel)
+        if len(base.active_dims) != 1:
+            raise ValueError(
+                f"FourierFeatures1D requires a 1D kernel (len(active_dims)==1); "
+                f"got active_dims={list(base.active_dims)}."
+            )
+        col = int(base.active_dims[0])
+        return X[:, col]
+
+    def _K_uf_base(self, base_kernel, x):
+        """Fourier basis evaluation for unit-variance Matern. Returns ``(M, N)``.
+
+        Block ordering: rows ``[cos(omega_k*(x-a)) for k=0..K, sin(omega_k*(x-a)) for k=1..K]``.
+        Assumes ``x in [a, b]``; out-of-domain handling is the domain wrapper's job.
+        """
+        a, b = self.a, self.b
+        K = self.num_frequencies
+        omegas = 2.0 * np.pi * np.arange(K + 1) / (b - a)  # length K+1
+        omegas_sin = omegas[1:]
+        shifted = x - a
+        # cos block: shape (K+1, N)
+        cos_block = pt.cos(pt.as_tensor(omegas)[:, None] * shifted[None, :])
+        # sin block: shape (K, N)
+        sin_block = pt.sin(pt.as_tensor(omegas_sin)[:, None] * shifted[None, :])
+        return pt.concatenate([cos_block, sin_block], axis=0)
+
+    def K_uf(self, kernel, X):
+        scale, base = self._resolve_scaled_matern(kernel)
+        x = self._get_active_column(kernel, X)
+        return scale * self._K_uf_base(base, x)
+
+    def Kuu_solve(self, kernel, rhs):
+        """``Kuu^{-1} @ rhs`` via the Woodbury identity. ``rhs`` must be ``(M, K)``."""
+        d, U = self._structured_Kuu(kernel)
+        Dinv_rhs = rhs / d[:, None]
+        Dinv_U = U / d[:, None]
+        R = U.shape[1]
+        C = pt.eye(R) + U.T @ Dinv_U
+        correction = Dinv_U @ pt.linalg.solve(C, U.T @ Dinv_rhs)
+        return Dinv_rhs - correction
+
+    def Kuu_logdet(self, kernel):
+        """``log det Kuu`` via the matrix-determinant lemma."""
+        d, U = self._structured_Kuu(kernel)
+        R = U.shape[1]
+        Dinv_U = U / d[:, None]
+        _, ld_small = pt.linalg.slogdet(pt.eye(R) + U.T @ Dinv_U)
+        return pt.sum(pt.log(d)) + ld_small
+
+    def Kuu_sqrt_solve(self, kernel, rhs):
+        """Apply ``R^{-1}`` where ``R @ R.T = Kuu = diag(d) + U @ U.T``. ``rhs`` is ``(M, K)``.
+
+        Uses ``delta = -1 / (sqrt(1 + lam) * (1 + sqrt(1 + lam)))`` — algebraically
+        equivalent to ``1/sqrt(1+lam) - 1`` divided by ``lam`` but with no division by
+        ``lam`` or ``sqrt(lam)``, so it stays finite as ``lam -> 0``.
+        """
+        d, U = self._structured_Kuu(kernel)
+        sqrt_d = pt.sqrt(d)
+        G = U.T @ (U / d[:, None])
+        lam, Q = pt.linalg.eigh(G)
+        sqrt1p = pt.sqrt(1.0 + lam)
+        delta = -1.0 / (sqrt1p * (1.0 + sqrt1p))
+
+        t = rhs / sqrt_d[:, None]
+        UT_Dinv_rhs = U.T @ (rhs / d[:, None])
+        z = Q.T @ UT_Dinv_rhs
+        z_scaled = delta[:, None] * z
+        y = Q @ z_scaled
+        correction = (U @ y) / sqrt_d[:, None]
+        return t + correction

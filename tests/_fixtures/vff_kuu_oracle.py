@@ -25,6 +25,21 @@ def _omegas(a, b, ms):
     return 2.0 * np.pi * np.asarray(ms, dtype=float) / (b - a)
 
 
+def oracle_kuf_no_edges(a, b, ms, X):
+    """Dense ``Kuf`` (M, N) for unit-variance Matern in block ordering, X in [a, b].
+
+    Mirrors ``make_Kuf_no_edges`` from st--/VFF; the basis is the same for all
+    Matern{12,32,52} on the interior of the domain. Out-of-domain handling is
+    delegated to the domain wrapper at compile time.
+    """
+    omegas = _omegas(a, b, ms)
+    x = np.asarray(X, dtype=float).ravel() - a
+    cos_block = np.cos(omegas[:, None] * x[None, :])  # (K+1, N)
+    omegas_sin = omegas[omegas != 0]
+    sin_block = np.sin(omegas_sin[:, None] * x[None, :])  # (K, N)
+    return np.vstack([cos_block, sin_block])
+
+
 def oracle_kuu_matern12(a, b, ms, ls):
     """Dense Kuu for unit-variance Matern12 in block ordering."""
     omegas = _omegas(a, b, ms)
