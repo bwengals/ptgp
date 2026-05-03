@@ -8,6 +8,7 @@ import numpy as np
 import pytensor
 import pytensor.tensor as pt
 import scipy.cluster.vq
+from dataclasses import dataclass
 
 from ptgp.kernels.base import Kernel
 
@@ -67,22 +68,28 @@ def random_subsample_init(X, M, rng=None):
     return Points(X[idx])
 
 
-def kmeans_init(X, M, rng=None):
+def kmeans_init(X, M, rng=None, tol=1e-6):
     """k-means++ centroids of ``X`` as inducing points.
 
-    Uses :func:`scipy.cluster.vq.kmeans2` with ``minit="++"``.
+    Uses :func:`scipy.cluster.vq.kmeans2` with ``minit="++"``.  After
+    clustering, any centroids whose pairwise Euclidean distance is below
+    ``tol`` are deduplicated (greedy: the first of each near-duplicate group
+    is kept).  A summary is printed if any are removed.
 
     Parameters
     ----------
     X : array-like, shape (N, D)
     M : int
-        Number of clusters / inducing points.
+        Number of clusters / inducing points requested.
     rng : int or numpy Generator, optional
+    tol : float, optional
+        Euclidean-distance threshold below which two centroids are considered
+        duplicates.  Default ``1e-6``.
 
     Returns
     -------
     Points
-        Wrapping an ``(M, D)`` numpy array of centroids.
+        Wrapping an ``(M', D)`` numpy array of centroids, with ``M' <= M``.
     """
     X = np.asarray(X, dtype=np.float64)
     N = X.shape[0]
@@ -90,10 +97,84 @@ def kmeans_init(X, M, rng=None):
         raise ValueError(f"M={M} exceeds number of candidate points N={N}")
     seed = int(np.random.default_rng(rng).integers(0, 2**31 - 1))
     centroids, _ = scipy.cluster.vq.kmeans2(X, M, minit="++", seed=seed)
-    return Points(centroids)
+
+    # Greedy deduplication: keep centroid i if it is > tol from all earlier
+    # kept centroids.  O(M^2) but M is typically small (100-500).
+    dists = np.sqrt(np.sum((centroids[:, None] - centroids[None, :]) ** 2, axis=-1))
+    keep = np.ones(M, dtype=bool)
+    for i in range(M):
+        if not keep[i]:
+            continue
+        near = dists[i, i + 1 :] < tol
+        keep[i + 1 :][near] = False
+
+    n_removed = int((~keep).sum())
+    if n_removed > 0:
+        print(
+            f"kmeans_init: removed {n_removed} near-duplicate centroid(s) "
+            f"(tol={tol:.0e}); returning {keep.sum()} of {M} requested."
+        )
+
+    return Points(centroids[keep])
 
 
-def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None, compile_kwargs=None):
+@dataclass
+class GreedyVarianceDiagnostics:
+    """Diagnostics returned by :func:`greedy_variance_init`.
+
+    Attributes
+    ----------
+    trace_curve : ndarray, shape (M,)
+        Remaining unexplained variance after conditioning on each successive
+        inducing point. ``trace_curve[0]`` is the total kernel diagonal sum
+        before any conditioning; ``trace_curve[m]`` is the residual after
+        conditioning on ``m`` points. Divide by ``total_variance`` to get the
+        fraction of variance still unexplained.
+    d_final : ndarray, shape (N,)
+        Per-data-point residual conditional variance after all M points are
+        selected. Large values identify data points poorly covered by the
+        current inducing set.
+    total_variance : float
+        Total kernel diagonal sum before conditioning (``trace_curve[0]``).
+    kuu_min_eigenvalue : float
+        Smallest eigenvalue of ``K(Z, Z) + jitter * I``.
+    kuu_max_eigenvalue : float
+        Largest eigenvalue of ``K(Z, Z) + jitter * I``.
+    kuu_condition_number : float
+        ``max_eig / min_eig``. Values below ~1e5 are numerically healthy.
+        Large values indicate near-duplicate inducing points or a kernel
+        lengthscale too short relative to the inducing-point spacing.
+    kuu_n_small_eigenvalues : int
+        Number of eigenvalues below ``kuu_eig_threshold``. Non-zero values
+        mean the inducing-point covariance is near-singular.
+    kuu_eig_threshold : float
+        Threshold used to count small eigenvalues (default 1e-4).
+    """
+    trace_curve: np.ndarray
+    d_final: np.ndarray
+    total_variance: float
+    kuu_min_eigenvalue: float
+    kuu_max_eigenvalue: float
+    kuu_condition_number: float
+    kuu_n_small_eigenvalues: int
+    kuu_eig_threshold: float
+
+    def __repr__(self):
+        M = len(self.trace_curve)
+        pct = 100.0 * (1.0 - self.trace_curve[-1] / self.total_variance)
+        lines = [
+            f"M                 : {M}",
+            f"variance explained: {pct:.1f}%",
+            f"min eigenvalue    : {self.kuu_min_eigenvalue:.3g}",
+            f"max eigenvalue    : {self.kuu_max_eigenvalue:.3g}",
+            f"condition number  : {self.kuu_condition_number:.3g}",
+            f"eigs < {self.kuu_eig_threshold:.0e}     : {self.kuu_n_small_eigenvalues}",
+        ]
+        return "\n".join(lines)
+
+
+def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None,
+                         eig_threshold=1e-4, compile_kwargs=None):
     """Greedy conditional-variance (pivoted-Cholesky) selection.
 
     Implements the "ConditionalVariance" initialization of Burt et al. (2020),
@@ -137,6 +218,9 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None, co
     jitter : float, optional
         Small diagonal jitter for numerical stability.
     rng : int or numpy Generator, optional
+    eig_threshold : float, optional
+        Eigenvalues of ``K(Z, Z) + jitter * I`` below this value are counted
+        in ``kuu_n_small_eigenvalues``. Default ``1e-4``.
     compile_kwargs : dict, optional
         Forwarded as ``**compile_kwargs`` to ``pytensor.function`` when
         compiling the kernel evaluations. Use to set ``mode``
@@ -145,8 +229,13 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None, co
 
     Returns
     -------
-    Points
+    points : Points
         Wrapping an ``(M', D)`` numpy array with ``M' <= M``.
+    diagnostics : GreedyVarianceDiagnostics
+        Dataclass with fields ``trace_curve``, ``d_final``, ``total_variance``,
+        ``kuu_min_eigenvalue``, ``kuu_max_eigenvalue``, ``kuu_condition_number``,
+        ``kuu_n_small_eigenvalues``, and ``kuu_eig_threshold``.
+        ``repr(diagnostics)`` prints a one-screen summary.
     """
     if not isinstance(kernel, Kernel):
         raise TypeError("kernel must be a ptgp Kernel")
@@ -167,14 +256,30 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None, co
     Xp = X[perm]
 
     d = k_diag_fn(Xp) + jitter
+    total_variance = float(d.sum())
     indices = np.zeros(M, dtype=int)
     indices[0] = int(np.argmax(d))
 
     if M == 1:
-        return Points(Xp[indices])
+        Z1 = Xp[indices]
+        Kuu1 = k_cross_fn(Z1, Z1) + jitter * np.eye(1)
+        eig1 = float(Kuu1[0, 0])
+        diag = GreedyVarianceDiagnostics(
+            trace_curve=np.array([total_variance]),
+            d_final=d.copy(),
+            total_variance=total_variance,
+            kuu_min_eigenvalue=eig1,
+            kuu_max_eigenvalue=eig1,
+            kuu_condition_number=1.0,
+            kuu_n_small_eigenvalues=int(eig1 < eig_threshold),
+            kuu_eig_threshold=eig_threshold,
+        )
+        return Points(Z1), diag
 
     C = np.zeros((M - 1, N))
     final_m = M
+    trace_curve = np.empty(M)
+    trace_curve[0] = total_variance
 
     for m in range(M - 1):
         j = int(indices[m])
@@ -188,6 +293,7 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None, co
         C[m, :] = e
 
         d = np.maximum(d - e**2, 0.0)
+        trace_curve[m + 1] = float(d.sum())
 
         indices[m + 1] = int(np.argmax(d))
 
@@ -195,4 +301,18 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None, co
             final_m = m + 2
             break
 
-    return Points(Xp[indices[:final_m]])
+    Z_selected = Xp[indices[:final_m]]
+    Kuu = k_cross_fn(Z_selected, Z_selected) + jitter * np.eye(final_m)
+    eigs = np.linalg.eigvalsh(Kuu)  # sorted ascending
+
+    diag = GreedyVarianceDiagnostics(
+        trace_curve=trace_curve[:final_m].copy(),
+        d_final=d.copy(),
+        total_variance=total_variance,
+        kuu_min_eigenvalue=float(eigs[0]),
+        kuu_max_eigenvalue=float(eigs[-1]),
+        kuu_condition_number=float(eigs[-1] / eigs[0]),
+        kuu_n_small_eigenvalues=int(np.sum(eigs < eig_threshold)),
+        kuu_eig_threshold=eig_threshold,
+    )
+    return Points(Z_selected), diag

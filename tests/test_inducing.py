@@ -93,15 +93,20 @@ class TestGreedyVariance:
     def test_returns_inducing_points(self):
         X = np.random.default_rng(0).standard_normal((50, 2))
         kernel = ExpQuad(input_dim=2, ls=1.0)
-        ip = greedy_variance_init(X, 10, kernel, rng=0)
+        ip, diag = greedy_variance_init(X, 10, kernel, rng=0)
         assert isinstance(ip, Points)
         assert isinstance(ip.Z, np.ndarray)
         assert ip.Z.shape == (10, 2)
+        assert hasattr(diag, "trace_curve")
+        assert hasattr(diag, "d_final")
+        assert hasattr(diag, "total_variance")
+        assert hasattr(diag, "kuu_min_eigenvalue")
+        assert hasattr(diag, "kuu_condition_number")
 
     def test_rows_are_in_x(self):
         X = np.random.default_rng(0).standard_normal((50, 2))
         kernel = ExpQuad(input_dim=2, ls=1.0)
-        ip = greedy_variance_init(X, 15, kernel, rng=0)
+        ip, _ = greedy_variance_init(X, 15, kernel, rng=0)
         for z in ip.Z:
             assert np.any(np.all(np.isclose(X, z), axis=1))
 
@@ -111,7 +116,8 @@ class TestGreedyVariance:
         kernel = ExpQuad(input_dim=1, ls=1.0)
         M = 10
 
-        greedy_err = _nystrom_residual_trace(X, greedy_variance_init(X, M, kernel, rng=0).Z, kernel)
+        ip, _ = greedy_variance_init(X, M, kernel, rng=0)
+        greedy_err = _nystrom_residual_trace(X, ip.Z, kernel)
         random_errs = [
             _nystrom_residual_trace(X, random_subsample_init(X, M, rng=s).Z, kernel) for s in range(10)
         ]
@@ -122,7 +128,7 @@ class TestGreedyVariance:
         rng = np.random.default_rng(0)
         X = rng.standard_normal((30, 2))
         kernel = ExpQuad(input_dim=2, ls=1.0)
-        ip = greedy_variance_init(X, 25, kernel, threshold=1e6, rng=0)
+        ip, _ = greedy_variance_init(X, 25, kernel, threshold=1e6, rng=0)
         assert ip.Z.shape[0] < 25
 
     def test_rejects_non_kernel(self):
@@ -150,7 +156,7 @@ class TestIntegrationWithSVGP:
         y = np.sin(X[:, 0]) + 0.1 * rng.standard_normal(40)
         kernel = ExpQuad(input_dim=1, ls=1.0)
 
-        ip = greedy_variance_init(X, 5, kernel, rng=0)
+        ip, _ = greedy_variance_init(X, 5, kernel, rng=0)
         vp = VariationalParams(
             q_mu=pt.zeros(5),
             q_sqrt=pt.assume(pt.eye(5), lower_triangular=True),
@@ -162,6 +168,6 @@ class TestIntegrationWithSVGP:
             variational_params=vp,
         )
         val = pytensor.function(
-            [], elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+            [], elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).elbo
         )()
         assert np.isfinite(val)
