@@ -157,7 +157,7 @@ class TestSVGPStudentTSmoke:
         y_var = pt.vector("y")
 
         train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-            pg.objectives.elbo,
+            lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo,
             svgp,
             X_var,
             y_var,
@@ -210,7 +210,7 @@ class TestSVGPStudentTElboMatchesReference:
         )
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
-        elbo_expr = pg.objectives.elbo(svgp, X_var, y_var)
+        elbo_expr = pg.objectives.elbo(svgp, X_var, y_var).elbo
         fn = pytensor.function(
             [X_var, y_var, *vp.extra_vars, ls, eta, sigma], elbo_expr
         )
@@ -292,7 +292,7 @@ class TestSVGPNegBinomSmoke:
         y_var = pt.vector("y")
 
         train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-            pg.objectives.elbo,
+            lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo,
             svgp,
             X_var,
             y_var,
@@ -345,7 +345,7 @@ class TestSVGPNegBinomElboMatchesReference:
         )
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
-        elbo_expr = pg.objectives.elbo(svgp, X_var, y_var)
+        elbo_expr = pg.objectives.elbo(svgp, X_var, y_var).elbo
         fn = pytensor.function(
             [X_var, y_var, *vp.extra_vars, ls, eta, alpha], elbo_expr
         )

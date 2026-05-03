@@ -65,7 +65,7 @@ class TestSVGPBernoulliSmoke:
         y_var = pt.vector("y")
 
         train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-            pg.objectives.elbo,
+            lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo,
             svgp,
             X_var,
             y_var,
@@ -128,7 +128,7 @@ class TestSVGPBernoulliElboMatchesGPJax:
         )
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
-        elbo_expr = pg.objectives.elbo(svgp, X_var, y_var)
+        elbo_expr = pg.objectives.elbo(svgp, X_var, y_var).elbo
         fn = pytensor.function([X_var, y_var, *vp.extra_vars, ls, eta], elbo_expr)
         return float(fn(X, y, *vp.extra_init, ls_val, eta_val))
 
@@ -204,7 +204,7 @@ class TestSVGPPoissonSmoke:
         y_var = pt.vector("y")
 
         train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-            pg.objectives.elbo,
+            lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo,
             svgp,
             X_var,
             y_var,
@@ -267,7 +267,7 @@ class TestSVGPPoissonElboMatchesGPJax:
         )
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
-        elbo_expr = pg.objectives.elbo(svgp, X_var, y_var)
+        elbo_expr = pg.objectives.elbo(svgp, X_var, y_var).elbo
         fn = pytensor.function([X_var, y_var, *vp.extra_vars, ls, eta], elbo_expr)
         return float(fn(X, y, *vp.extra_init, ls_val, eta_val))
 

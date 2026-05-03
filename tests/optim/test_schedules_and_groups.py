@@ -138,7 +138,7 @@ class TestCompileTrainingStepGroups:
         sigma_vv = model.rvs_to_values[sigma]
 
         train_step, shared_params, _ = pg.optim.compile_training_step(
-            pg.objectives.marginal_log_likelihood,
+            lambda gp, X, y: pg.objectives.marginal_log_likelihood(gp, X, y).mll,
             gp,
             X_var,
             y_var,
@@ -174,7 +174,7 @@ class TestCompileTrainingStepGroups:
 
         with pytest.raises(ValueError, match="unknown variable"):
             pg.optim.compile_training_step(
-                pg.objectives.marginal_log_likelihood,
+                lambda gp, X, y: pg.objectives.marginal_log_likelihood(gp, X, y).mll,
                 gp,
                 X_var,
                 y_var,

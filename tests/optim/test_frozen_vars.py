@@ -39,7 +39,7 @@ class TestFrozenVars:
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
         train_step, _, _ = pg.optim.compile_training_step(
-            pg.objectives.elbo, svgp, X_var, y_var,
+            lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo, svgp, X_var, y_var,
             model=model,
             extra_vars=vp.extra_vars,
             extra_init=vp.extra_init,
@@ -66,7 +66,7 @@ class TestFrozenVars:
 
         # Phase 1: Z frozen.
         train_step_1, shared_1, extras_1 = pg.optim.compile_training_step(
-            pg.objectives.elbo, svgp, X_var, y_var,
+            lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo, svgp, X_var, y_var,
             model=model,
             extra_vars=vp.extra_vars,
             extra_init=vp.extra_init,
@@ -78,7 +78,7 @@ class TestFrozenVars:
 
         # Phase 2: same svgp, Z now trainable via extra_vars.
         train_step_2, shared_2, extras_2 = pg.optim.compile_training_step(
-            pg.objectives.elbo, svgp, X_var, y_var,
+            lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo, svgp, X_var, y_var,
             model=model,
             extra_vars=[*vp.extra_vars, Z_var],
             extra_init=[*vp.extra_init, Z0],
@@ -107,7 +107,7 @@ class TestFrozenVars:
 
         with pytest.raises(ValueError, match="both extra_vars and frozen_vars"):
             pg.optim.compile_training_step(
-                pg.objectives.elbo, svgp, X_var, y_var,
+                lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo, svgp, X_var, y_var,
                 model=model,
                 extra_vars=[*vp.extra_vars, Z_var],
                 extra_init=[*vp.extra_init, Z0],

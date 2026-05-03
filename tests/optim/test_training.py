@@ -40,7 +40,7 @@ def test_compile_training_step_gp(gp_data):
     y_var = pt.vector("y")
 
     train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-        pg.objectives.marginal_log_likelihood,
+        lambda gp, X, y: pg.objectives.marginal_log_likelihood(gp, X, y).mll,
         gp,
         X_var,
         y_var,
@@ -72,7 +72,7 @@ def test_compile_predict_gp(gp_data):
     y_var = pt.vector("y")
 
     train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-        pg.objectives.marginal_log_likelihood,
+        lambda gp, X, y: pg.objectives.marginal_log_likelihood(gp, X, y).mll,
         gp,
         X_var,
         y_var,
@@ -130,7 +130,7 @@ def test_compile_training_step_svgp(svgp_data):
     y_var = pt.vector("y")
 
     train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-        pg.objectives.elbo,
+        lambda gp, X, y: pg.objectives.elbo(gp, X, y).elbo,
         svgp,
         X_var,
         y_var,
@@ -170,7 +170,7 @@ def test_prior_shifts_optimum(gp_data):
         X_var = pt.matrix("X")
         y_var = pt.vector("y")
         train_step, shared_params, _ = pg.optim.compile_training_step(
-            pg.objectives.marginal_log_likelihood,
+            lambda gp, X, y: pg.objectives.marginal_log_likelihood(gp, X, y).mll,
             gp,
             X_var,
             y_var,
@@ -207,7 +207,7 @@ def test_sgd_optimizer(gp_data):
     y_var = pt.vector("y")
 
     train_step, shared_params, shared_extras = pg.optim.compile_training_step(
-        pg.objectives.marginal_log_likelihood,
+        lambda gp, X, y: pg.objectives.marginal_log_likelihood(gp, X, y).mll,
         gp,
         X_var,
         y_var,

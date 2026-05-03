@@ -57,7 +57,7 @@ def test_unapproximated_joint_graph_at_cubic_floor():
     sigma = pt.dscalar("sigma")
     ls = pt.dscalar("ls")
     gp = Unapproximated(kernel=ExpQuad(input_dim=1, ls=ls), mean=Zero(), sigma=sigma)
-    loss = marginal_log_likelihood(gp, X, y)
+    loss = marginal_log_likelihood(gp, X, y).mll
     g_sigma, g_ls = pt.grad(loss, [sigma, ls])
     fn = pytensor.function([X, y, sigma, ls], [loss, g_sigma, g_ls])
     n = _count_cubic_ops(fn)
@@ -81,7 +81,7 @@ def test_vfe_joint_graph_at_cubic_floor():
         sigma=sigma,
         inducing_variable=Points(Z),
     )
-    loss = -collapsed_elbo(vfe, X, y)
+    loss = -collapsed_elbo(vfe, X, y).elbo
     g_sigma, g_ls, g_Z = pt.grad(loss, [sigma, ls, Z])
     fn = pytensor.function([X, y, sigma, ls, Z], [loss, g_sigma, g_ls, g_Z])
     n = _count_cubic_ops(fn)
@@ -107,7 +107,7 @@ def test_svgp_joint_graph_at_cubic_floor():
         inducing_variable=Points(Z),
         variational_params=vp,
     )
-    loss = -elbo(svgp, X, y)
+    loss = -elbo(svgp, X, y).elbo
     g_sigma, g_ls, g_Z, g_qmu, g_qsq = pt.grad(
         loss, [sigma, ls, Z, vp.q_mu, vp.extra_vars[1]]
     )

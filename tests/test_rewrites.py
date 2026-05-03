@@ -435,7 +435,7 @@ def _gp_mll_like_joint():
     sigma = pt.dscalar("sigma")
     ls = pt.dscalar("ls")
     gp = Unapproximated(kernel=ExpQuad(input_dim=1, ls=ls), mean=Zero(), sigma=sigma)
-    loss = marginal_log_likelihood(gp, X, y)
+    loss = marginal_log_likelihood(gp, X, y).mll
     g_sigma, g_ls = pt.grad(loss, [sigma, ls])
     return [sigma, ls, X, y], [loss, g_sigma, g_ls]
 

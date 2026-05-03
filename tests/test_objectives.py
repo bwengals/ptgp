@@ -35,7 +35,7 @@ class TestMarginalLogLikelihood:
     def test_finite(self, regression_data):
         X, y = regression_data
         gp = Unapproximated(kernel=ExpQuad(input_dim=1, ls=1.0), mean=Zero(), sigma=0.1)
-        mll = _eval(marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        mll = _eval(marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).mll)
         assert np.isfinite(mll)
 
     def test_better_fit_higher_mll(self, regression_data):
@@ -45,10 +45,10 @@ class TestMarginalLogLikelihood:
         gp_bad = Unapproximated(kernel=ExpQuad(input_dim=1, ls=0.01), mean=Zero(), sigma=10.0)
 
         mll_good = _eval(
-            marginal_log_likelihood(gp_good, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+            marginal_log_likelihood(gp_good, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).mll
         )
         mll_bad = _eval(
-            marginal_log_likelihood(gp_bad, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+            marginal_log_likelihood(gp_bad, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).mll
         )
 
         assert mll_good > mll_bad
@@ -70,7 +70,7 @@ class TestELBO:
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
             variational_params=self._identity_vp(5),
         )
-        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).elbo)
         assert np.isfinite(elbo_val)
 
     def test_unwhitened_finite(self, regression_data, inducing_points):
@@ -83,7 +83,7 @@ class TestELBO:
             variational_params=self._identity_vp(5),
             whiten=False,
         )
-        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).elbo)
         assert np.isfinite(elbo_val)
 
     def test_whitened_and_unwhitened_agree_at_prior(self, regression_data, inducing_points):
@@ -134,7 +134,7 @@ class TestELBO:
 
         gp = Unapproximated(kernel=kernel, mean=Zero(), sigma=sigma)
         mll_val = _eval(
-            marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+            marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).mll
         )
 
         svgp = SVGP(
@@ -144,7 +144,7 @@ class TestELBO:
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
             variational_params=self._identity_vp(5),
         )
-        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        elbo_val = _eval(elbo(svgp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).elbo)
 
         assert elbo_val <= mll_val + 1e-6  # ELBO <= MLL
 
@@ -158,7 +158,7 @@ class TestCollapsedELBO:
             sigma=0.1,
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
         )
-        celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).elbo)
         assert np.isfinite(celbo)
 
     def test_collapsed_elbo_less_than_mll(self, regression_data, inducing_points):
@@ -169,7 +169,7 @@ class TestCollapsedELBO:
 
         gp = Unapproximated(kernel=kernel, mean=Zero(), sigma=sigma)
         mll_val = _eval(
-            marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y))
+            marginal_log_likelihood(gp, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).mll
         )
 
         vfe_model = VFE(
@@ -178,6 +178,6 @@ class TestCollapsedELBO:
             sigma=sigma,
             inducing_variable=Points(pt.as_tensor_variable(inducing_points)),
         )
-        celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)))
+        celbo = _eval(collapsed_elbo(vfe_model, pt.as_tensor_variable(X), pt.as_tensor_variable(y)).elbo)
 
         assert celbo <= mll_val + 1e-6  # collapsed ELBO <= MLL

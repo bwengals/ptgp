@@ -1,4 +1,13 @@
+from collections import namedtuple
+
+import numpy as np
 import pytensor.tensor as pt
+
+MLLTerms = namedtuple("MLLTerms", ["mll", "fit", "logdet"])
+ELBOTerms = namedtuple("ELBOTerms", ["elbo", "var_exp", "kl"])
+CollapsedELBOTerms = namedtuple(
+    "CollapsedELBOTerms", ["elbo", "fit", "trace_penalty", "nystrom_residual"]
+)
 
 
 # Diagonal jitter added to Kuu before Cholesky / inversion, to keep it PSD
@@ -27,11 +36,13 @@ def marginal_log_likelihood(gp, X, y):
     K = gp.kernel(X) + gp.likelihood.sigma**2 * pt.eye(X.shape[0])
 
     diff = y - mu
-    sign, logdet = pt.linalg.slogdet(K)
+    sign, logdet_K = pt.linalg.slogdet(K)
     K_inv = pt.linalg.inv(K)
     N = X.shape[0]
 
-    return -0.5 * (diff @ K_inv @ diff + logdet + N * pt.log(2.0 * pt.pi))
+    fit = -0.5 * (diff @ K_inv @ diff + N * pt.log(2.0 * pt.pi))
+    logdet = -0.5 * logdet_K
+    return MLLTerms(mll=fit + logdet, fit=fit, logdet=logdet)
 
 
 def elbo(svgp, X, y, n_data=None):
@@ -57,36 +68,42 @@ def elbo(svgp, X, y, n_data=None):
     """
     fmean, fvar = svgp.predict_marginal(X)
 
-    var_exp = svgp.likelihood.variational_expectation(y, fmean, fvar)
-    var_exp_sum = pt.sum(var_exp)
-
     if n_data is not None:
         batch_size = X.shape[0]
         scale = n_data / batch_size
     else:
         scale = 1.0
 
+    var_exp = scale * pt.sum(svgp.likelihood.variational_expectation(y, fmean, fvar))
     kl = svgp.prior_kl()
-
-    return scale * var_exp_sum - kl
+    return ELBOTerms(elbo=var_exp - kl, var_exp=var_exp, kl=kl)
 
 
 def collapsed_elbo(vfe, X, y):
-    """VFE/SGPR collapsed ELBO (Titsias' bound), Woodbury form.
+    """VFE/SGPR collapsed ELBO (Titsias' bound), Bauer/GPflow factored form.
 
     Same loss as the standard formulation
         ELBO = log N(y; m, Q + σ²I) - 1/(2σ²) * tr(Kff - Q),
     where ``Q = Kuf.T @ inv(Kuu) @ Kuf`` is the Nystrom approximation,
-    but the N×N inverse and log-det of ``cov = σ²I + Q`` are rewritten
-    via the Woodbury identity into operations on the M×M matrix
-    ``D = σ²·Kuu + Kuf @ Kuf.T``. This is mathematically equivalent and
-    much better conditioned when N >> M (the regime sparse GPs are made
-    for) — the original N×N covariance has N - M eigenvalues clamped at
-    exactly σ², which causes catastrophic cancellation in the gradient.
+    rewritten so that the N×N inverse and log-det of ``cov = Q + σ²I``
+    become operations on a well-conditioned M×M matrix.
 
-    Identities used (B = chol(Kuu)^{-1} @ Kuf, but never materialised):
-        inv(σ²I + Q) = (I - Kuf.T @ inv(D) @ Kuf) / σ²
-        log|σ²I + Q| = (N - M) · log σ² + log|D| - log|Kuu|
+    Factorisation
+    -------------
+    Let ``Lu = chol(Kuu)`` and ``A = Lu^{-1} @ Kuf`` (M × N). Then
+        D := σ²·Kuu + Kuf·Kuf.T = Lu · (σ²·I + A·A.T) · Lu.T,
+    so ``inv(D) = Lu^{-T} · inv(inner) · Lu^{-1}`` and
+       ``log|D| = 2·log|Lu| + log|inner|``,
+    where ``inner = σ²·I + A·A.T`` has eigenvalues bounded below by σ².
+    This bound is the numerical advantage over inverting D directly: when
+    Kuu is poorly scaled (small kernel amplitude → tiny Kuu eigenvalues),
+    ``D = σ²·Kuu + Kuf·Kuf.T`` can have eigenvalues that underflow,
+    causing ``log|D| → -∞``; ``inner`` cannot.
+
+    Identities used (Q = A.T·A, log|Kuu| cancels out):
+        Q                            = A.T @ A
+        Kuf.T @ inv(D) @ v           = A.T @ inv(inner) @ (A @ v)
+        (N-M)·log σ² + log|D| - log|Kuu|  = (N-M)·log σ² + log|inner|
 
     Parameters
     ----------
@@ -118,22 +135,125 @@ def collapsed_elbo(vfe, X, y):
         positive_definite=True, symmetric=True,
     )
 
-    # Q_diag = diag(Kuf.T @ inv(Kuu) @ Kuf) for the trace penalty.
-    Kuu_inv_Kuf = pt.linalg.inv(Kuu) @ Kuf
-    Q_diag = pt.sum(Kuf * Kuu_inv_Kuf, axis=0)
+    # Factor Kuu once; reuse for both the Q_diag (trace) term and the inner
+    # matrix that replaces D. log|Kuu| never needs to be computed because it
+    # cancels in logdet_cov.
+    Lu = pt.linalg.cholesky(Kuu)
+    A = pt.linalg.solve_triangular(Lu, Kuf, lower=True)   # M × N
+    Q_diag = pt.sum(A * A, axis=0)                        # diag(Kuf.T·Kuu^{-1}·Kuf)
 
-    # Woodbury: invert only the M × M matrix D, never the N × N cov.
-    D = sigma2 * Kuu + Kuf @ Kuf.T    # PSD by Gram construction
-    D = pt.assume(D, positive_definite=True, symmetric=True)
+    # ``inner`` has eigenvalues ≥ σ²; it is the well-conditioned analogue of
+    # the M×M matrix D = σ²·Kuu + Kuf·Kuf.T from the direct Woodbury form.
+    inner = sigma2 * pt.eye(M, dtype=Kuu.dtype) + A @ A.T
+    inner = pt.assume(inner, positive_definite=True, symmetric=True)
 
     diff = y - mu
-    Kuf_diff = Kuf @ diff
-    quad = (diff @ diff - Kuf_diff @ pt.linalg.inv(D) @ Kuf_diff) / sigma2
+    A_diff = A @ diff
+    quad = (diff @ diff - A_diff @ pt.linalg.inv(inner) @ A_diff) / sigma2
 
-    _, logdet_D = pt.linalg.slogdet(D)
-    _, logdet_Kuu = pt.linalg.slogdet(Kuu)
-    logdet_cov = (N - M) * pt.log(sigma2) + logdet_D - logdet_Kuu
+    _, logdet_inner = pt.linalg.slogdet(inner)
+    logdet_cov = (N - M) * pt.log(sigma2) + logdet_inner
 
     fit = -0.5 * (quad + logdet_cov + N * pt.log(2.0 * pt.pi))
-    trace_penalty = -0.5 / sigma2 * pt.sum(Kff_diag - Q_diag)
-    return fit + trace_penalty
+    nystrom_residual = pt.sum(Kff_diag - Q_diag)
+    trace_penalty = -0.5 / sigma2 * nystrom_residual
+    return CollapsedELBOTerms(
+        elbo=fit + trace_penalty,
+        fit=fit,
+        trace_penalty=trace_penalty,
+        nystrom_residual=nystrom_residual,
+    )
+
+
+def dpp_regularizer(vfe, jitter=_DEFAULT_JITTER):
+    """Determinantal Point Process repulsive regularizer for inducing points.
+
+    Returns ``log det K(Z, Z)``, which is large when the inducing points are
+    spread out (diverse) and goes to ``-inf`` as any two points collapse
+    together. Adding a positive multiple of this to ``collapsed_elbo`` makes
+    the effective ``logdet_Kuu`` coefficient larger than the 0.5 that comes
+    from the Woodbury derivation, increasing repulsion between Z points.
+
+    Note: adding this term makes the objective a *regularized* objective, not
+    a valid evidence lower bound. Use it when numerical stability of Kuu
+    matters more than a tight bound -- for example, when jointly optimizing Z
+    with the hyperparameters.
+
+    Parameters
+    ----------
+    vfe : VFE
+        VFE sparse GP model.
+    jitter : float, optional
+        Diagonal jitter added to K(Z, Z) before computing the log-determinant.
+        Should match the jitter used in ``collapsed_elbo``.
+
+    Returns
+    -------
+    scalar
+        ``log det (K(Z, Z) + jitter * I)``.
+
+    Examples
+    --------
+    Make the total ``logdet_Kuu`` coefficient 1.0 instead of 0.5::
+
+        def objective(vfe, X, y):
+            return collapsed_elbo(vfe, X, y).elbo + 0.5 * dpp_regularizer(vfe)
+
+    Tune the strength via a variable::
+
+        strength = 1.0
+        def objective(vfe, X, y):
+            return collapsed_elbo(vfe, X, y).elbo + strength * dpp_regularizer(vfe)
+    """
+    Z = vfe.inducing_variable.Z
+    M = Z.shape[0]
+    Kuu = vfe.kernel(Z)
+    Kuu = pt.assume(
+        Kuu + jitter * pt.eye(M, dtype=Kuu.dtype),
+        positive_definite=True, symmetric=True,
+    )
+    _, logdet_Kuu = pt.linalg.slogdet(Kuu)
+    return logdet_Kuu
+
+
+VFEDiagnostics = namedtuple(
+    "VFEDiagnostics",
+    ["elbo", "fit", "trace_penalty", "nystrom_residual",
+     "sigma", "fit_per_n", "excess_fit_per_n"],
+)
+
+
+def vfe_diagnostics(vfe, X, y):
+    """Collapsed ELBO terms plus sigma and two normalised fit metrics.
+
+    Returns a ``VFEDiagnostics`` namedtuple of symbolic TensorVariables,
+    suitable for use with :func:`ptgp.optim.compile_scipy_diagnostics`.
+
+    Fields
+    ------
+    elbo, fit, trace_penalty
+        Direct from :func:`collapsed_elbo`.
+    nystrom_residual
+        ``tr(Kff - Qff) / N`` — per-point Nyström approximation error.
+    sigma
+        Likelihood noise (constrained space).
+    fit_per_n
+        ``fit / N`` — scale-invariant data fit.
+    excess_fit_per_n
+        ``fit_per_n + 0.5 * log(2π σ²)`` — how much better than noise floor.
+        Goes to zero when the model fits at the noise level only.
+    """
+    terms = collapsed_elbo(vfe, X, y)
+    N = X.shape[0]
+    sigma = vfe.likelihood.sigma
+    fit_per_n = terms.fit / N
+    excess_fit_per_n = fit_per_n + 0.5 * pt.log(2.0 * np.pi * sigma**2)
+    return VFEDiagnostics(
+        elbo=terms.elbo,
+        fit=terms.fit,
+        trace_penalty=terms.trace_penalty,
+        nystrom_residual=terms.nystrom_residual / N,
+        sigma=sigma,
+        fit_per_n=fit_per_n,
+        excess_fit_per_n=excess_fit_per_n,
+    )
