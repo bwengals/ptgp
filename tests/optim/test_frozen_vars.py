@@ -96,6 +96,48 @@ class TestFrozenVars:
         Z_final = extras_2[2].get_value()
         assert np.linalg.norm(Z_final - Z0) > 0, "Z should move in phase 2"
 
+    def test_frozen_pymc_var_initial_value_in_scipy_objective(self):
+        """A PyMC value var listed in frozen_vars must have its shared slot
+        (and thus its theta0 slice and unpack target) initialized to the
+        freeze value, not to PyMC's initial point. Regression test for the
+        bug where phase-1 of minimize_staged_vfe ran with sigma frozen but
+        diagnostics/shared-var reported the PyMC initial point instead.
+        """
+        X_var = pt.matrix("X")
+        y_var = pt.vector("y")
+        with pm.Model() as model:
+            ls = pm.HalfFlat("ls")
+            eta = pm.Exponential("eta", lam=1.0)
+            sigma = pm.HalfNormal("sigma", sigma=1.0)
+            gp = pg.gp.Unapproximated(
+                kernel=eta**2 * pg.kernels.Matern52(input_dim=1, ls=ls),
+                sigma=sigma,
+            )
+
+        sigma_vv = model.rvs_to_values[sigma]
+        # Constrained value 0.123 → unconstrained via the model's transform.
+        transform = model.rvs_to_transforms[sigma]
+        sigma_unc = float(
+            transform.forward(pt.as_tensor_variable(0.123)).eval()
+        )
+
+        _, theta0, _, shared_params, _ = pg.optim.compile_scipy_objective(
+            lambda gp, X, y: pg.objectives.marginal_log_likelihood(gp, X, y).mll,
+            gp, X_var, y_var, model=model,
+            frozen_vars={sigma_vv: sigma_unc},
+        )
+
+        # Shared var for sigma must hold the freeze value, not the PyMC
+        # initial point (which would be 0 in unconstrained space).
+        np.testing.assert_allclose(
+            shared_params[sigma_vv].get_value(), sigma_unc, atol=1e-12,
+        )
+
+        # And the theta0 slot for sigma must match — same source, but verify
+        # the layout is consistent so unpack writes back the right value.
+        sigma_idx = list(model.continuous_value_vars).index(sigma_vv)
+        np.testing.assert_allclose(theta0[sigma_idx], sigma_unc, atol=1e-12)
+
     def test_overlap_with_extra_vars_raises(self):
         Z_var = pt.matrix("Z")
         M = 5
