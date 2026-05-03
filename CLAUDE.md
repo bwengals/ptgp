@@ -22,6 +22,7 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 
 ## Conventions
 
+- **Function naming**: action first, then narrower qualifiers. `minimize_staged_vfe` not `staged_vfe_minimize`. `compile_scipy_objective` not `objective_scipy_compile`.
 - **Scale parameter**: Use `eta` for kernel amplitude. Kernels are scaled by `eta**2` (e.g. `eta**2 * ExpQuad(ls=ls)`), so `eta` is always squared.
 - **Lengthscale**: Use `ls` for lengthscale parameters.
 - **Multiple parameters**: When there are multiple scale or lengthscale parameters (e.g. additive kernels), number them: `eta1`, `eta2`, `ls1`, `ls2`.
