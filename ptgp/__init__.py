@@ -7,6 +7,7 @@ from ptgp import (
     objectives,
     optim,
     rewrites,  # noqa: F401  (registers PyTensor rewrites at import)
+    utils,
 )
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "mean",
     "objectives",
     "optim",
+    "utils",
 ]
 
 
