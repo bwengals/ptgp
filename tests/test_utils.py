@@ -22,7 +22,7 @@ def _make_simple_model_and_objective():
     X_var = pt.matrix("X", shape=X.shape)
     y_var = pt.vector("y", shape=y.shape)
 
-    Z_init = pg.inducing.kmeans_init(X, 8, rng=0).Z
+    Z_init = pg.inducing.kmeans_init(X, 8, rng=0)[0].Z
 
     with pm.Model() as model:
         eta = pm.Exponential("eta", scale=1.0)

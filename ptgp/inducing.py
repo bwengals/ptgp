@@ -4,11 +4,13 @@ The `*_init` functions return an :class:`Points` wrapping a plain
 numpy array, so ``ip.Z`` is directly usable for plotting.
 """
 
+from dataclasses import dataclass
+from typing import Optional
+
 import numpy as np
 import pytensor
 import pytensor.tensor as pt
 import scipy.cluster.vq
-from dataclasses import dataclass
 
 from ptgp.kernels.base import Kernel
 
@@ -42,7 +44,220 @@ class Points(InducingVariables):
         return self.Z.shape[0]
 
 
-def random_subsample_init(X, M, rng=None):
+@dataclass
+class KernelHealthDiagnostics:
+    """Kernel-derived health metrics for a (kernel, X, Z) triple.
+
+    Independent of how ``Z`` was produced. Used as the optional
+    ``kernel_health`` field on :class:`RandomSubsampleDiagnostics` and
+    :class:`KMeansDiagnostics`, and as the standalone return type of
+    :func:`compute_inducing_diagnostics`.
+
+    Attributes
+    ----------
+    d_final : ndarray, shape (N,)
+        Per-data-point residual conditional variance ``Kff_diag - Q_diag``.
+        Large values identify points poorly covered by ``Z``.
+    total_variance : float
+        ``tr(Kff)`` — the kernel diagonal sum on ``X`` before conditioning.
+    nystrom_residual : float
+        ``sum(d_final) = tr(Kff - Q)`` — total unexplained variance.
+    kuu_min_eigenvalue : float
+        Smallest eigenvalue of ``K(Z, Z) + jitter * I``.
+    kuu_max_eigenvalue : float
+        Largest eigenvalue of ``K(Z, Z) + jitter * I``.
+    kuu_condition_number : float
+        ``max_eig / min_eig``. Below ~1e5 is healthy.
+    kuu_n_small_eigenvalues : int
+        Number of eigenvalues below ``kuu_eig_threshold``.
+    kuu_eig_threshold : float
+        Threshold used to count small eigenvalues.
+    """
+    d_final: np.ndarray
+    total_variance: float
+    nystrom_residual: float
+    kuu_min_eigenvalue: float
+    kuu_max_eigenvalue: float
+    kuu_condition_number: float
+    kuu_n_small_eigenvalues: int
+    kuu_eig_threshold: float
+
+    def __repr__(self):
+        pct = 100.0 * (1.0 - self.nystrom_residual / self.total_variance)
+        return "\n".join([
+            f"variance explained: {pct:.1f}%",
+            f"nystrom_residual  : {self.nystrom_residual:.4g}",
+            f"min eigenvalue    : {self.kuu_min_eigenvalue:.3g}",
+            f"max eigenvalue    : {self.kuu_max_eigenvalue:.3g}",
+            f"condition number  : {self.kuu_condition_number:.3g}",
+            f"eigs < {self.kuu_eig_threshold:.0e}     : {self.kuu_n_small_eigenvalues}",
+        ])
+
+
+@dataclass
+class RandomSubsampleDiagnostics:
+    """Diagnostics returned by :func:`random_subsample_init`.
+
+    Attributes
+    ----------
+    M_requested : int
+        The ``M`` argument.
+    M_returned : int
+        Rows in the returned ``Z``. Always equals ``M_requested`` for this
+        routine — kept for API symmetry with the other init routines.
+    N_candidates : int
+        Rows in the input ``X``.
+    n_unique : int
+        Number of unique rows in the returned ``Z``. Equals ``M_returned``
+        unless ``X`` itself contained duplicate rows that were both
+        sampled.
+    pairwise_min_distance : float
+        Minimum off-diagonal Euclidean distance between selected points.
+        ``nan`` if ``M_returned < 2``.
+    pairwise_mean_distance : float
+        Mean off-diagonal Euclidean distance between selected points.
+        ``nan`` if ``M_returned < 2``.
+    kernel_health : KernelHealthDiagnostics or None
+        Populated only when a ``kernel`` was passed to
+        :func:`random_subsample_init`. ``None`` otherwise.
+    """
+    M_requested: int
+    M_returned: int
+    N_candidates: int
+    n_unique: int
+    pairwise_min_distance: float
+    pairwise_mean_distance: float
+    kernel_health: Optional[KernelHealthDiagnostics] = None
+
+    def __repr__(self):
+        density = 100.0 * self.M_returned / self.N_candidates
+        lines = [
+            f"M requested        : {self.M_requested}",
+            f"M returned         : {self.M_returned}",
+            f"N candidates       : {self.N_candidates}",
+            f"selection density  : {density:.2f}%",
+            f"unique rows        : {self.n_unique}",
+            f"pairwise min dist  : {self.pairwise_min_distance:.3g}",
+            f"pairwise mean dist : {self.pairwise_mean_distance:.3g}",
+        ]
+        if self.kernel_health is not None:
+            kh = self.kernel_health
+            lines.append(
+                f"kernel health      : cond={kh.kuu_condition_number:.3g}  "
+                f"eigs<{kh.kuu_eig_threshold:.0e}={kh.kuu_n_small_eigenvalues}  "
+                f"nystrom={kh.nystrom_residual:.3g}"
+            )
+        return "\n".join(lines)
+
+
+@dataclass
+class KMeansDiagnostics:
+    """Diagnostics returned by :func:`kmeans_init`.
+
+    Attributes
+    ----------
+    M_requested : int
+        Clusters requested. The k-means algorithm runs at this size before
+        any near-duplicate removal.
+    M_returned : int
+        Centroids returned after near-duplicate removal. ``<= M_requested``.
+    n_removed_duplicates : int
+        ``M_requested - M_returned``. Non-zero values mean k-means
+        produced near-duplicate centroids that were deduplicated.
+    dedup_tol : float
+        The Euclidean-distance threshold used for deduplication.
+    inertia : float
+        ``sum_i ||X[i] - centroid[label[i]]||^2`` — k-means' standard
+        within-cluster sum of squares. Smaller is tighter.
+    pairwise_min_distance : float
+        Minimum Euclidean distance between returned centroids. ``nan`` if
+        ``M_returned < 2``. Should be ``> dedup_tol``.
+    pairwise_mean_distance : float
+        Mean off-diagonal Euclidean distance between returned centroids.
+    kernel_health : KernelHealthDiagnostics or None
+        Populated only when a ``kernel`` was passed to
+        :func:`kmeans_init`. ``None`` otherwise.
+    """
+    M_requested: int
+    M_returned: int
+    n_removed_duplicates: int
+    dedup_tol: float
+    inertia: float
+    pairwise_min_distance: float
+    pairwise_mean_distance: float
+    kernel_health: Optional[KernelHealthDiagnostics] = None
+
+    def __repr__(self):
+        lines = [
+            f"M requested        : {self.M_requested}",
+            f"M returned         : {self.M_returned}",
+            f"removed duplicates : {self.n_removed_duplicates}  (tol={self.dedup_tol:.0e})",
+            f"inertia            : {self.inertia:.4g}",
+            f"pairwise min dist  : {self.pairwise_min_distance:.3g}",
+            f"pairwise mean dist : {self.pairwise_mean_distance:.3g}",
+        ]
+        if self.kernel_health is not None:
+            kh = self.kernel_health
+            lines.append(
+                f"kernel health      : cond={kh.kuu_condition_number:.3g}  "
+                f"eigs<{kh.kuu_eig_threshold:.0e}={kh.kuu_n_small_eigenvalues}  "
+                f"nystrom={kh.nystrom_residual:.3g}"
+            )
+        return "\n".join(lines)
+
+
+def _pairwise_distance_stats(Z):
+    """Return ``(min, mean)`` of the upper-triangular Euclidean distance matrix.
+
+    O(M^2) memory and compute. ``nan, nan`` if ``M < 2``.
+    """
+    M = Z.shape[0]
+    if M < 2:
+        return float("nan"), float("nan")
+    d = np.sqrt(np.sum((Z[:, None] - Z[None, :]) ** 2, axis=-1))
+    iu = np.triu_indices(M, k=1)
+    return float(d[iu].min()), float(d[iu].mean())
+
+
+def _compute_kernel_health(kernel, X, Z, jitter=1e-6, eig_threshold=1e-4,
+                           compile_kwargs=None):
+    """Compute :class:`KernelHealthDiagnostics` for an arbitrary (kernel, X, Z).
+
+    Used by :func:`compute_inducing_diagnostics` and the optional
+    ``kernel`` path of :func:`random_subsample_init` / :func:`kmeans_init`.
+    """
+    if not isinstance(kernel, Kernel):
+        raise TypeError("kernel must be a ptgp Kernel")
+    X = np.asarray(X, dtype=np.float64)
+    Z = np.asarray(Z, dtype=np.float64)
+    M = Z.shape[0]
+    D = X.shape[1]
+
+    X_sym = pt.matrix("_X", shape=(None, D), dtype="float64")
+    Y_sym = pt.matrix("_Y", shape=(None, D), dtype="float64")
+    ck = compile_kwargs or {}
+    k_cross_fn = pytensor.function([X_sym, Y_sym], kernel(X_sym, Y_sym), **ck)
+    k_diag_fn = pytensor.function([X_sym], pt.diag(kernel(X_sym)), **ck)
+
+    Kff_diag = k_diag_fn(X)
+    Kuu = k_cross_fn(Z, Z) + jitter * np.eye(M)
+    Kuf = k_cross_fn(Z, X)
+
+    L = np.linalg.cholesky(Kuu)
+    A = np.linalg.solve(L, Kuf)
+    Q_diag = np.sum(A * A, axis=0)
+    d_final = np.maximum(Kff_diag - Q_diag, 0.0)
+
+    return KernelHealthDiagnostics(
+        d_final=d_final,
+        total_variance=float(Kff_diag.sum()),
+        nystrom_residual=float(d_final.sum()),
+        **_compute_kuu_eig_stats(Kuu, eig_threshold),
+    )
+
+
+def random_subsample_init(X, M, rng=None, kernel=None, jitter=1e-6,
+                          eig_threshold=1e-4, compile_kwargs=None):
     """Select ``M`` inducing points uniformly at random from ``X``.
 
     Parameters
@@ -53,11 +268,27 @@ def random_subsample_init(X, M, rng=None):
         Number of inducing points.
     rng : int or numpy Generator, optional
         Seed or generator for reproducibility.
+    kernel : Kernel, optional
+        If given, also compute :class:`KernelHealthDiagnostics`
+        (Kuu eigenvalues, Nyström residual, per-point coverage) and
+        attach it to the returned diagnostic's ``kernel_health`` field.
+        Otherwise ``kernel_health`` is ``None``.
+    jitter : float, optional
+        Diagonal jitter for ``K(Z, Z)`` when ``kernel`` is given.
+        Default 1e-6.
+    eig_threshold : float, optional
+        Threshold below which Kuu eigenvalues are counted as "small".
+        Default 1e-4.
+    compile_kwargs : dict, optional
+        Forwarded to ``pytensor.function`` for the kernel evaluation.
 
     Returns
     -------
-    Points
+    points : Points
         Wrapping an ``(M, D)`` numpy array.
+    diagnostics : RandomSubsampleDiagnostics
+        Spread / coverage summary, optionally with ``kernel_health``.
+        ``repr(diagnostics)`` prints a one-screen summary.
     """
     X = np.asarray(X)
     N = X.shape[0]
@@ -65,10 +296,28 @@ def random_subsample_init(X, M, rng=None):
         raise ValueError(f"M={M} exceeds number of candidate points N={N}")
     rng = np.random.default_rng(rng)
     idx = rng.choice(N, size=M, replace=False)
-    return Points(X[idx])
+    Z = X[idx]
+    pmin, pmean = _pairwise_distance_stats(Z)
+    kernel_health = (
+        _compute_kernel_health(kernel, X, Z, jitter=jitter,
+                               eig_threshold=eig_threshold,
+                               compile_kwargs=compile_kwargs)
+        if kernel is not None else None
+    )
+    diag = RandomSubsampleDiagnostics(
+        M_requested=int(M),
+        M_returned=int(Z.shape[0]),
+        N_candidates=int(N),
+        n_unique=int(np.unique(Z, axis=0).shape[0]),
+        pairwise_min_distance=pmin,
+        pairwise_mean_distance=pmean,
+        kernel_health=kernel_health,
+    )
+    return Points(Z), diag
 
 
-def kmeans_init(X, M, rng=None, tol=1e-6):
+def kmeans_init(X, M, rng=None, tol=1e-6, kernel=None, jitter=1e-6,
+                eig_threshold=1e-4, compile_kwargs=None):
     """k-means++ centroids of ``X`` as inducing points.
 
     Uses :func:`scipy.cluster.vq.kmeans2` with ``minit="++"``.  After
@@ -85,18 +334,38 @@ def kmeans_init(X, M, rng=None, tol=1e-6):
     tol : float, optional
         Euclidean-distance threshold below which two centroids are considered
         duplicates.  Default ``1e-6``.
+    kernel : Kernel, optional
+        If given, also compute :class:`KernelHealthDiagnostics`
+        (Kuu eigenvalues, Nyström residual, per-point coverage) and
+        attach it to the returned diagnostic's ``kernel_health`` field.
+        Otherwise ``kernel_health`` is ``None``.
+    jitter : float, optional
+        Diagonal jitter for ``K(Z, Z)`` when ``kernel`` is given.
+        Default 1e-6.
+    eig_threshold : float, optional
+        Threshold below which Kuu eigenvalues are counted as "small".
+        Default 1e-4.
+    compile_kwargs : dict, optional
+        Forwarded to ``pytensor.function`` for the kernel evaluation.
 
     Returns
     -------
-    Points
+    points : Points
         Wrapping an ``(M', D)`` numpy array of centroids, with ``M' <= M``.
+    diagnostics : KMeansDiagnostics
+        Cluster-fit summary, optionally with ``kernel_health``.
+        ``repr(diagnostics)`` prints a one-screen summary.
     """
     X = np.asarray(X, dtype=np.float64)
     N = X.shape[0]
     if M > N:
         raise ValueError(f"M={M} exceeds number of candidate points N={N}")
     seed = int(np.random.default_rng(rng).integers(0, 2**31 - 1))
-    centroids, _ = scipy.cluster.vq.kmeans2(X, M, minit="++", seed=seed)
+    centroids, labels = scipy.cluster.vq.kmeans2(X, M, minit="++", seed=seed)
+
+    # Inertia: within-cluster sum of squared distances. Computed on the
+    # full M centroid set (before dedup) since labels are assigned to those.
+    inertia = float(np.sum((X - centroids[labels]) ** 2))
 
     # Greedy deduplication: keep centroid i if it is > tol from all earlier
     # kept centroids.  O(M^2) but M is typically small (100-500).
@@ -115,7 +384,25 @@ def kmeans_init(X, M, rng=None, tol=1e-6):
             f"(tol={tol:.0e}); returning {keep.sum()} of {M} requested."
         )
 
-    return Points(centroids[keep])
+    Z = centroids[keep]
+    pmin, pmean = _pairwise_distance_stats(Z)
+    kernel_health = (
+        _compute_kernel_health(kernel, X, Z, jitter=jitter,
+                               eig_threshold=eig_threshold,
+                               compile_kwargs=compile_kwargs)
+        if kernel is not None else None
+    )
+    diag = KMeansDiagnostics(
+        M_requested=int(M),
+        M_returned=int(Z.shape[0]),
+        n_removed_duplicates=n_removed,
+        dedup_tol=float(tol),
+        inertia=inertia,
+        pairwise_min_distance=pmin,
+        pairwise_mean_distance=pmean,
+        kernel_health=kernel_health,
+    )
+    return Points(Z), diag
 
 
 @dataclass
@@ -263,16 +550,11 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None,
     if M == 1:
         Z1 = Xp[indices]
         Kuu1 = k_cross_fn(Z1, Z1) + jitter * np.eye(1)
-        eig1 = float(Kuu1[0, 0])
         diag = GreedyVarianceDiagnostics(
             trace_curve=np.array([total_variance]),
             d_final=d.copy(),
             total_variance=total_variance,
-            kuu_min_eigenvalue=eig1,
-            kuu_max_eigenvalue=eig1,
-            kuu_condition_number=1.0,
-            kuu_n_small_eigenvalues=int(eig1 < eig_threshold),
-            kuu_eig_threshold=eig_threshold,
+            **_compute_kuu_eig_stats(Kuu1, eig_threshold),
         )
         return Points(Z1), diag
 
@@ -303,16 +585,74 @@ def greedy_variance_init(X, M, kernel, threshold=0.0, jitter=1e-12, rng=None,
 
     Z_selected = Xp[indices[:final_m]]
     Kuu = k_cross_fn(Z_selected, Z_selected) + jitter * np.eye(final_m)
-    eigs = np.linalg.eigvalsh(Kuu)  # sorted ascending
+    eig_stats = _compute_kuu_eig_stats(Kuu, eig_threshold)
 
     diag = GreedyVarianceDiagnostics(
         trace_curve=trace_curve[:final_m].copy(),
         d_final=d.copy(),
         total_variance=total_variance,
-        kuu_min_eigenvalue=float(eigs[0]),
-        kuu_max_eigenvalue=float(eigs[-1]),
-        kuu_condition_number=float(eigs[-1] / eigs[0]),
-        kuu_n_small_eigenvalues=int(np.sum(eigs < eig_threshold)),
-        kuu_eig_threshold=eig_threshold,
+        **eig_stats,
     )
     return Points(Z_selected), diag
+
+
+def _compute_kuu_eig_stats(Kuu, eig_threshold=1e-4):
+    """Eigenvalue summary for a Kuu matrix.
+
+    Returns a dict with the five ``kuu_*`` fields used by
+    :class:`GreedyVarianceDiagnostics`.
+    """
+    eigs = np.linalg.eigvalsh(Kuu)
+    return {
+        "kuu_min_eigenvalue": float(eigs[0]),
+        "kuu_max_eigenvalue": float(eigs[-1]),
+        "kuu_condition_number": float(eigs[-1] / eigs[0]),
+        "kuu_n_small_eigenvalues": int(np.sum(eigs < eig_threshold)),
+        "kuu_eig_threshold": eig_threshold,
+    }
+
+
+def compute_inducing_diagnostics(kernel, X, Z, jitter=1e-6, eig_threshold=1e-4,
+                                 compile_kwargs=None):
+    """Evaluate inducing-point health at a *given* (kernel, X, Z).
+
+    Computes the same kernel-derived metrics that
+    :func:`greedy_variance_init` reports (Kuu eigenvalues, per-point
+    residual conditional variance, total variance), but for a ``Z`` that
+    you already have — from k-means, manual placement, post-training, or
+    elsewhere. No greedy selection is performed; no ``trace_curve``
+    history is available.
+
+    This is a thin wrapper around :func:`_compute_kernel_health`; the
+    same diagnostic is also exposed by passing ``kernel=`` to
+    :func:`random_subsample_init` and :func:`kmeans_init`.
+
+    Parameters
+    ----------
+    kernel : Kernel
+        PTGP kernel, compiled internally via ``pytensor.function``.
+    X : array-like, shape (N, D)
+        Data locations.
+    Z : array-like, shape (M, D)
+        Inducing locations.
+    jitter : float, optional
+        Diagonal jitter added to ``K(Z, Z)`` before the eigenvalue and
+        Cholesky computations. Default 1e-6.
+    eig_threshold : float, optional
+        Threshold below which Kuu eigenvalues are counted as "small".
+    compile_kwargs : dict, optional
+        Forwarded as ``**compile_kwargs`` to ``pytensor.function``.
+
+    Returns
+    -------
+    KernelHealthDiagnostics
+        ``d_final``, ``total_variance``, ``nystrom_residual``, and the
+        ``kuu_*`` eigenvalue stats. ``repr()`` prints a one-screen
+        summary.
+    """
+    return _compute_kernel_health(
+        kernel, X, Z,
+        jitter=jitter,
+        eig_threshold=eig_threshold,
+        compile_kwargs=compile_kwargs,
+    )
