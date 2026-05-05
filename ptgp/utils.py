@@ -1,5 +1,7 @@
 """Diagnostic utilities for PTGP models."""
 
+import json
+
 import numpy as np
 
 
@@ -178,3 +180,216 @@ def _build_index_labels(n_theta, model, extra_vars, extra_init):
         return None
 
     return labels
+
+
+_FIT_PARAM_PREFIX = "p__"
+_FIT_EXTRA_PREFIX = "e__"
+_FIT_META_KEY = "__meta__"
+
+
+def save_fit(path, shared_params, shared_extras=(), meta=None):
+    """Save trained PTGP shared-variable values to a compressed ``.npz`` file.
+
+    Stores the unconstrained values held by every entry of ``shared_params``
+    and ``shared_extras`` under name-keyed slots, plus an optional JSON
+    ``meta`` blob. Reload with :func:`load_fit` after rebuilding the model.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Destination ``.npz`` path. The ``.npz`` suffix is added by numpy if
+        absent.
+    shared_params : dict
+        ``{value_var: shared_var}`` from ``compile_scipy_objective`` /
+        ``compile_training_step`` / ``minimize_staged_vfe``.
+    shared_extras : sequence of pytensor shared variables, optional
+        From the same training call (e.g. ``Z``, ``q_mu``, ``q_sqrt``).
+    meta : dict, optional
+        Arbitrary JSON-serialisable metadata stored alongside the values.
+        Recommended entries: ``as_of`` date, target column name, feature
+        column list, model commit hash, fit timestamp. Read back as a dict
+        by :func:`load_fit`.
+
+    Raises
+    ------
+    ValueError
+        If two shared variables share the same name within either bucket
+        (would silently overwrite on save).
+
+    Examples
+    --------
+    Saving after a VFE fit::
+
+        result, history, labels, unpack, sp, se = minimize_staged_vfe(
+            objective_fn, gp_model, X_var, y_var, X, y, model,
+            sigma_init=0.1, Z_var=Z_var, Z_init=Z_init,
+        )
+        unpack(result.x)
+
+        from ptgp.utils import save_fit
+        save_fit(
+            "fit_threefactor_2026-04-22.npz", sp, se,
+            meta={
+                "as_of": "2026-04-22",
+                "target": "oas_sofr",
+                "features": ["maturity_years", "leverage", "vol_1", "market_cap"],
+                "ptgp_commit": "abc1234",
+                "model": "threefactor_vfe",
+            },
+        )
+    """
+    blob = {}
+    seen = set()
+    for vv, sv in shared_params.items():
+        name = vv.name
+        if name in seen:
+            raise ValueError(
+                f"Duplicate shared_params name {name!r}; cannot save unambiguously."
+            )
+        seen.add(name)
+        blob[_FIT_PARAM_PREFIX + name] = np.asarray(sv.get_value())
+
+    seen = set()
+    for sv in shared_extras:
+        name = sv.name
+        if name is None:
+            raise ValueError(
+                "Every entry of shared_extras must have a .name set; "
+                "found a shared variable with name=None."
+            )
+        if name in seen:
+            raise ValueError(
+                f"Duplicate shared_extras name {name!r}; cannot save unambiguously."
+            )
+        seen.add(name)
+        blob[_FIT_EXTRA_PREFIX + name] = np.asarray(sv.get_value())
+
+    if meta is not None:
+        blob[_FIT_META_KEY] = np.asarray(json.dumps(meta))
+
+    np.savez_compressed(path, **blob)
+
+
+def load_fit(path, shared_params, shared_extras=(), strict=True):
+    """Load values saved by :func:`save_fit` into freshly built shared vars.
+
+    Rebuild the PyMC model, GP model, and call ``compile_scipy_objective``
+    (or ``compile_training_step`` / ``minimize_staged_vfe``) the same way
+    you did for the original fit; that gives you a new ``shared_params``
+    and ``shared_extras`` initialised from the prior. Pass them here and
+    every shared variable is overwritten with its saved value, ready for
+    :func:`compile_predict`.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to a file written by :func:`save_fit`.
+    shared_params : dict
+        Same layout as the dict that was saved.
+    shared_extras : sequence of pytensor shared variables, optional
+        Same as the sequence that was saved (matched by ``.name``, not order).
+    strict : bool
+        If True (default), raise when the file's name set does not exactly
+        match the provided shared variables (missing or extra names) or when
+        any shape disagrees. If False, missing names are skipped with a
+        warning and extras in the file are ignored.
+
+    Returns
+    -------
+    dict or None
+        The ``meta`` dict that was passed to :func:`save_fit`, or ``None``
+        if no metadata was stored.
+
+    Raises
+    ------
+    ValueError
+        Under ``strict=True``, if any saved name is absent from the
+        provided shared variables (or vice versa), or if shapes mismatch.
+
+    Examples
+    --------
+    Reload and predict, no retraining::
+
+        # Rebuild model graph identically (same PyMC code, same gp_model,
+        # same compile_scipy_objective call):
+        with pm.Model() as model:
+            ...  # priors
+            gp_model = VFE(...)
+        fun, theta0, unpack, sp, se = compile_scipy_objective(
+            objective_fn, gp_model, X_var, y_var, model=model,
+            extra_vars=[Z_var], extra_init=[Z_init],
+        )
+
+        from ptgp.utils import load_fit
+        meta = load_fit("fit_threefactor_2026-04-22.npz", sp, se)
+        print(meta["as_of"], meta["features"])
+
+        predict_fn = compile_predict(
+            gp_model, X_new_var, model, sp,
+            extra_vars=[Z_var], shared_extras=se,
+        )
+        mean, var = predict_fn(X_new)
+    """
+    blob = np.load(path, allow_pickle=False)
+    file_keys = set(blob.files)
+
+    param_keys = {
+        k[len(_FIT_PARAM_PREFIX):]: k
+        for k in file_keys if k.startswith(_FIT_PARAM_PREFIX)
+    }
+    extra_keys = {
+        k[len(_FIT_EXTRA_PREFIX):]: k
+        for k in file_keys if k.startswith(_FIT_EXTRA_PREFIX)
+    }
+
+    shared_params_by_name = {vv.name: sv for vv, sv in shared_params.items()}
+    shared_extras_by_name = {sv.name: sv for sv in shared_extras}
+
+    if strict:
+        missing_p = set(param_keys) - set(shared_params_by_name)
+        extra_p = set(shared_params_by_name) - set(param_keys)
+        missing_e = set(extra_keys) - set(shared_extras_by_name)
+        extra_e = set(shared_extras_by_name) - set(extra_keys)
+        problems = []
+        if missing_p:
+            problems.append(f"params in file but not in shared_params: {sorted(missing_p)}")
+        if extra_p:
+            problems.append(f"shared_params not present in file: {sorted(extra_p)}")
+        if missing_e:
+            problems.append(f"extras in file but not in shared_extras: {sorted(missing_e)}")
+        if extra_e:
+            problems.append(f"shared_extras not present in file: {sorted(extra_e)}")
+        if problems:
+            raise ValueError(
+                "load_fit name mismatch (strict=True):\n  " + "\n  ".join(problems)
+            )
+
+    for name, key in param_keys.items():
+        sv = shared_params_by_name.get(name)
+        if sv is None:
+            print(f"[load_fit] skipping param {name!r}: not in shared_params")
+            continue
+        val = blob[key]
+        cur = sv.get_value()
+        if val.shape != cur.shape:
+            raise ValueError(
+                f"Shape mismatch for param {name!r}: file {val.shape} vs current {cur.shape}"
+            )
+        sv.set_value(np.asarray(val))
+
+    for name, key in extra_keys.items():
+        sv = shared_extras_by_name.get(name)
+        if sv is None:
+            print(f"[load_fit] skipping extra {name!r}: not in shared_extras")
+            continue
+        val = blob[key]
+        cur = sv.get_value()
+        if val.shape != cur.shape:
+            raise ValueError(
+                f"Shape mismatch for extra {name!r}: file {val.shape} vs current {cur.shape}"
+            )
+        sv.set_value(np.asarray(val))
+
+    if _FIT_META_KEY in file_keys:
+        return json.loads(str(blob[_FIT_META_KEY]))
+    return None
