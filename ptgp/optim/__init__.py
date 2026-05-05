@@ -7,6 +7,7 @@ from ptgp.optim.training import (
     compile_training_step,
     get_trained_params,
     minimize_staged_vfe,
+    phase_sort_key,
     tracked_minimize,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "compile_predict",
     "get_trained_params",
     "minimize_staged_vfe",
+    "phase_sort_key",
     "tracked_minimize",
 ]

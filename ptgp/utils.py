@@ -16,7 +16,9 @@ def get_initial_params(model, init="prior_median", rng=None, n_median_samples=50
     ----------
     model : pm.Model
     init : str
-        ``"default"``, ``"prior_draw"``, or ``"prior_median"``.
+        ``"prior_median"`` (default), ``"prior_draw"``, or
+        ``"unconstrained_zero"``. See :func:`ptgp.optim.training._make_initial_point`
+        for the per-RV fallback behaviour on improper priors.
     rng : int or numpy Generator, optional
     n_median_samples : int
         Number of draws used to estimate medians. Only used when

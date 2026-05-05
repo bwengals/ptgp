@@ -4,6 +4,8 @@ Uses ``pytensor.shared`` variables so that training automatically updates
 the parameters used by prediction — no model reconstruction needed.
 """
 
+import re
+
 import numpy as np
 import pymc as pm
 import pytensor
@@ -15,25 +17,70 @@ from ptgp.objectives import vfe_diagnostics
 from ptgp.optim.optimizers import adam
 
 
-def _make_initial_point(model, init="default", rng=None, n_median_samples=500):
+_PHASE_LABEL_RE = re.compile(r"^phase(?P<n>\d+)(?P<sub>[ab]?)(?:_c(?P<c>\d+))?$")
+
+
+def phase_sort_key(label):
+    """Sort key for :func:`minimize_staged_vfe` phase labels.
+
+    Sorts ``phase1`` < ``phase2a_c1`` < ``phase2b_c1`` < ``phase2a_c2`` <
+    ``phase2b_c2`` < ``phase3``.  Anything that doesn't match the schema
+    falls to the end alphabetically.
+
+    Used by external diagnostic scripts that consume the ``phase_labels``
+    list returned alongside the training history.
+    """
+    m = _PHASE_LABEL_RE.match(label)
+    if m is None:
+        return (99, 99, 99, label)
+    n = int(m.group("n"))
+    sub = m.group("sub") or ""
+    c = int(m.group("c")) if m.group("c") else 0
+    sub_rank = {"": 0, "a": 0, "b": 1}.get(sub, 99)
+    return (n, c, sub_rank, label)
+
+
+def _make_initial_point(model, init="prior_median", rng=None, n_median_samples=500):
     """Return an initial-point dict (unconstrained space) using ``init`` strategy.
 
     Parameters
     ----------
     model : pm.Model
     init : str
-        ``"default"``      -- PyMC's ``model.initial_point()``; 0 in
+        ``"prior_median"`` (default) -- median of each prior. Tries
+                              ``pm.icdf(rv, 0.5)`` (exact, deterministic);
+                              if unimplemented, falls back to the median of
+                              ``n_median_samples`` draws; if *that* fails,
+                              per-RV fallback to PyMC's initial point.
+        ``"prior_draw"``   -- one draw from each prior. Same per-RV fallback
+                              to PyMC's initial point on improper priors.
+        ``"unconstrained_zero"`` -- PyMC's ``model.initial_point()``; 0 in
                               unconstrained space for every parameter unless
                               ``initval`` was set explicitly.
-        ``"prior_draw"``   -- one draw from each prior distribution,
-                              transformed to unconstrained space.
-        ``"prior_median"`` -- median of each prior (estimated from
-                              ``n_median_samples`` draws), transformed to
-                              unconstrained space.
     rng : int or numpy Generator, optional
+        Seed for the sampling fallback under ``"prior_median"`` (used only if
+        ``pm.icdf`` is not implemented for an RV) and for ``"prior_draw"``.
     n_median_samples : int
-        Number of prior samples used to estimate the median.  Only used
-        when ``init="prior_median"``.
+        Number of prior samples used to estimate the median when
+        ``pm.icdf`` is not available for an RV. Only used under
+        ``init="prior_median"``.
+
+    Per-RV fallback for improper priors
+    -----------------------------------
+    Some priors cannot be sampled or quantiled. Improper priors like
+    ``pm.HalfFlat`` and ``pm.Flat`` raise ``NotImplementedError`` from both
+    ``pm.icdf`` and ``pm.draw`` because they have no proper measure. When
+    every method fails for a given RV — or returns non-finite values — that
+    RV's value is taken from ``model.initial_point()`` instead. PyMC's
+    initial point is 0 in unconstrained space for every parameter unless
+    ``initval`` was set explicitly, which corresponds to:
+
+    - ``HalfFlat`` (positive improper)        -> 1.0 constrained (exp(0))
+    - ``Flat``     (real improper)            -> 0.0
+    - any RV with explicit ``initval=v``      -> ``v`` constrained
+
+    Other RVs are unaffected; the rest of the model still gets prior-based
+    initialization.
 
     Returns
     -------
@@ -41,35 +88,57 @@ def _make_initial_point(model, init="default", rng=None, n_median_samples=500):
         ``{value_var_name: unconstrained_array}``, same layout as
         ``model.initial_point()``.
     """
-    if init == "default":
+    if init == "unconstrained_zero":
         return model.initial_point()
+    if init not in ("prior_draw", "prior_median"):
+        raise ValueError(
+            f"Unknown init strategy {init!r}. "
+            "Expected 'prior_median', 'prior_draw', or 'unconstrained_zero'."
+        )
 
     rng = np.random.default_rng(rng)
+    pymc_ip = model.initial_point()
     ip = {}
 
     for rv in model.free_RVs:
         vv = model.rvs_to_values[rv]
-        seed = int(rng.integers(0, 2**31))
+        val = None
 
-        if init == "prior_draw":
-            val = np.asarray(pm.draw(rv, random_seed=seed), dtype=np.float64)
-        elif init == "prior_median":
-            samples = pm.draw(rv, draws=n_median_samples, random_seed=seed)
-            val = np.asarray(np.median(samples, axis=0), dtype=np.float64)
-        else:
-            raise ValueError(
-                f"Unknown init strategy {init!r}. "
-                "Expected 'default', 'prior_draw', or 'prior_median'."
-            )
+        if init == "prior_median":
+            # Try exact icdf(0.5) first.
+            try:
+                val_t = pm.icdf(rv, 0.5).eval()
+                val_arr = np.asarray(val_t, dtype=np.float64)
+                if np.all(np.isfinite(val_arr)):
+                    val = val_arr
+            except (NotImplementedError, ValueError, RuntimeError, TypeError):
+                pass
 
-        transform = model.rvs_to_transforms.get(rv)
-        if transform is not None:
-            unconstrained = np.asarray(
-                transform.forward(pt.as_tensor_variable(val)).eval(),
-                dtype=np.float64,
-            )
+        if val is None:
+            # prior_draw, or prior_median with no icdf: try sampling.
+            try:
+                seed = int(rng.integers(0, 2**31))
+                if init == "prior_draw":
+                    val_arr = np.asarray(pm.draw(rv, random_seed=seed), dtype=np.float64)
+                else:  # prior_median fallback to draws
+                    samples = pm.draw(rv, draws=n_median_samples, random_seed=seed)
+                    val_arr = np.asarray(np.median(samples, axis=0), dtype=np.float64)
+                if np.all(np.isfinite(val_arr)):
+                    val = val_arr
+            except (NotImplementedError, ValueError, RuntimeError):
+                pass
+
+        if val is not None:
+            transform = model.rvs_to_transforms.get(rv)
+            if transform is not None:
+                unconstrained = np.asarray(
+                    transform.forward(pt.as_tensor_variable(val)).eval(),
+                    dtype=np.float64,
+                )
+            else:
+                unconstrained = val
         else:
-            unconstrained = val
+            unconstrained = np.asarray(pymc_ip[vv.name], dtype=np.float64)
 
         ip[vv.name] = unconstrained
 
@@ -77,7 +146,7 @@ def _make_initial_point(model, init="default", rng=None, n_median_samples=500):
 
 
 def _make_shared_params(model, extra_vars=None, extra_init=None,
-                        init="default", init_rng=None, frozen_vars=None):
+                        init="prior_median", init_rng=None, frozen_vars=None):
     """Create shared variables for a PyMC model's value vars and any extras.
 
     If ``frozen_vars`` is given, value vars appearing as keys are initialized
@@ -222,6 +291,19 @@ def compile_training_step(
         unconstrained parameter values. Needed by ``compile_predict``.
     shared_extras : list
         Shared variables for ``extra_vars``. Needed by ``compile_predict``.
+
+    Interrupts
+    ----------
+    ``train_step`` mutates the shared parameters in place on each call,
+    so the latest committed values are always available even if the
+    user-owned training loop is interrupted. Recommended pattern::
+
+        try:
+            for i in range(n_iters):
+                loss = train_step(X, y)
+        except KeyboardInterrupt:
+            print(f"[train] interrupted at iter {i}; shared vars hold the "
+                  f"most recently committed values.")
     """
     model = pm.modelcontext(model)
     if optimizer_fn is None:
@@ -297,7 +379,7 @@ def compile_scipy_objective(
     frozen_vars=None,
     include_prior=True,
     compile_kwargs=None,
-    init="default",
+    init="prior_median",
     init_rng=None,
 ):
     """Compile a (loss, grad) objective for ``scipy.optimize.minimize``.
@@ -352,16 +434,22 @@ def compile_scipy_objective(
     init : str
         Strategy for setting ``theta0``.  One of:
 
-        ``"default"``      PyMC ``model.initial_point()``: 0 in
-                           unconstrained space for every parameter unless
-                           ``initval`` was set explicitly. Equivalent to
-                           ``exp(0) = 1`` for all positive parameters.
-        ``"prior_draw"``   Draw once from each prior and transform to
-                           unconstrained space.  Adds stochasticity; use
-                           ``init_rng`` for reproducibility.
-        ``"prior_median"`` Median of each prior (estimated from 500 draws)
-                           transformed to unconstrained space.  Deterministic
-                           given ``init_rng``; more central than a single draw.
+        ``"prior_median"``      (default) Median of each prior (estimated
+                                from 500 draws) transformed to unconstrained
+                                space.  Deterministic given ``init_rng``.
+                                Improper priors (``HalfFlat``, ``Flat``) and
+                                other priors that can't be sampled fall back
+                                per-RV to PyMC's initial point. See
+                                :func:`_make_initial_point`.
+        ``"prior_draw"``        Draw once from each prior and transform to
+                                unconstrained space.  Adds stochasticity; use
+                                ``init_rng`` for reproducibility. Same
+                                per-RV fallback as ``"prior_median"``.
+        ``"unconstrained_zero"`` PyMC ``model.initial_point()``: 0 in
+                                unconstrained space for every parameter
+                                unless ``initval`` was set explicitly.
+                                Equivalent to ``exp(0) = 1`` for all
+                                positive parameters.
     init_rng : int or numpy Generator, optional
         Seed for ``"prior_draw"`` and ``"prior_median"`` strategies.
 
@@ -469,7 +557,7 @@ def compile_scipy_diagnostics(
     extra_init=None,
     frozen_vars=None,
     compile_kwargs=None,
-    init="default",
+    init="prior_median",
     init_rng=None,
 ):
     """Compile a diagnostics function that evaluates all namedtuple terms given theta.
@@ -621,6 +709,15 @@ def tracked_minimize(fun, theta0, args, diag_fn=None, print_every=None, **scipy_
         One entry per scipy callback invocation (roughly one per iteration
         for L-BFGS-B). Empty if ``diag_fn`` is None.
 
+    Interrupts
+    ----------
+    On ``KeyboardInterrupt`` (Ctrl-C), the optimization halts gracefully
+    and returns an ``OptimizeResult`` carrying the most recent iterate
+    seen by the callback (or ``theta0`` if no iteration completed).
+    The result has ``status=99``, ``success=False``, and
+    ``message`` starting with ``"KeyboardInterrupt"``. ``history``
+    reflects the iterations collected up to the interrupt.
+
     Examples
     --------
     ::
@@ -646,8 +743,10 @@ def tracked_minimize(fun, theta0, args, diag_fn=None, print_every=None, **scipy_
 
     history = []
     iteration = [0]
+    last_theta = [np.asarray(theta0, dtype=np.float64).copy()]
 
     def callback(theta):
+        last_theta[0] = np.asarray(theta, dtype=np.float64).copy()
         iteration[0] += 1
         if diag_fn is not None:
             terms = diag_fn(theta, *args)
@@ -660,9 +759,37 @@ def tracked_minimize(fun, theta0, args, diag_fn=None, print_every=None, **scipy_
 
     scipy_kwargs.setdefault("method", "L-BFGS-B")
     scipy_kwargs.setdefault("jac", True)
-    result = scipy.optimize.minimize(
-        fun, theta0, args=args, callback=callback, **scipy_kwargs
-    )
+    try:
+        result = scipy.optimize.minimize(
+            fun, theta0, args=args, callback=callback, **scipy_kwargs
+        )
+    except KeyboardInterrupt:
+        print(
+            f"\n[tracked_minimize] interrupted at iter {iteration[0]}; "
+            f"returning last-iterate state."
+        )
+        f_val, g_val = float("nan"), np.zeros_like(last_theta[0])
+        try:
+            _f, _g = fun(last_theta[0], *args)
+            f_val, g_val = float(_f), np.asarray(_g)
+        except KeyboardInterrupt:
+            print(
+                "[tracked_minimize] second interrupt during cleanup; "
+                "fun/jac left as nan/zero."
+            )
+        except Exception as e:
+            print(
+                f"[tracked_minimize] could not re-evaluate fun at last theta: {e!r}"
+            )
+        result = scipy.optimize.OptimizeResult(
+            x=last_theta[0],
+            fun=f_val,
+            jac=g_val,
+            nit=iteration[0],
+            success=False,
+            status=99,
+            message="KeyboardInterrupt: optimization halted by user",
+        )
     return result, history
 
 
@@ -722,7 +849,7 @@ def minimize_staged_vfe(
     print_every=20,
     compile_kwargs=None,
     scipy_options=None,
-    init="default",
+    init="prior_median",
     init_rng=None,
 ):
     """Staged VFE training to prevent inducing point collapse.
@@ -783,10 +910,10 @@ def minimize_staged_vfe(
         Forwarded as ``options=`` to ``scipy.optimize.minimize``.
     init : str
         Initialisation strategy for phase 1 hyperparameters. Same options as
-        :func:`compile_scipy_objective`: ``"default"`` (PyMC initial point — 0
-        in unconstrained space), ``"prior_draw"``, or ``"prior_median"``.
-        Only affects phase 1; later phases inherit converged values from the
-        previous phase.
+        :func:`compile_scipy_objective`: ``"prior_median"`` (default),
+        ``"prior_draw"``, or ``"unconstrained_zero"`` (PyMC initial point —
+        0 in unconstrained space). Only affects phase 1; later phases
+        inherit converged values from the previous phase.
     init_rng : int or numpy Generator, optional
         Seed for ``"prior_draw"`` / ``"prior_median"``.
 
@@ -806,6 +933,16 @@ def minimize_staged_vfe(
         From phase 3, for :func:`compile_predict` / :func:`get_trained_params`.
     shared_extras : list
         From phase 3, contains the shared variable for ``Z``.
+
+    Interrupts
+    ----------
+    On ``KeyboardInterrupt`` (Ctrl-C) during any sub-phase, the routine
+    halts that phase via :func:`tracked_minimize`'s graceful interrupt
+    handling, runs ``unpack`` on the last iterate, and returns
+    immediately without starting subsequent phases. The returned
+    ``result.status == 99``; ``unpack``, ``shared_params``, and
+    ``shared_extras`` correspond to the *interrupted* phase, so
+    :func:`compile_predict` wires up to the partially-trained state.
     """
     model = pm.modelcontext(model)
     sigma_rv = _find_sigma_rv(gp_model, model)
@@ -863,7 +1000,13 @@ def minimize_staged_vfe(
     # When Z is frozen, phase 1 theta has no Z slot; wrap diag_fn_full to
     # append Z_init_arr so its theta layout matches.
     p1_diag = _make_diag_2b(Z_init_arr) if phase1_freeze_Z else diag_fn_full
-    _run(fun1, theta0_1, unpack1, "phase1", phase1_maxiter, p1_diag)
+    result = _run(fun1, theta0_1, unpack1, "phase1", phase1_maxiter, p1_diag)
+    if result.status == 99:
+        # Z's shared var: if Z was a phase-1 extra, se1[0] holds it; otherwise
+        # we synthesize a one-element list with a fresh shared from Z_init_arr
+        # so the caller's compile_predict can wire up Z.
+        z_shared = se1 if not phase1_freeze_Z else [pytensor.shared(Z_init_arr, name=Z_var.name)]
+        return result, history, phase_labels, unpack1, sp1, z_shared
     hyper_state = {vv: sp1[vv].get_value().copy() for vv in model.continuous_value_vars}
     Z_state = Z_init_arr.copy() if phase1_freeze_Z else se1[0].get_value().copy()
 
@@ -877,7 +1020,9 @@ def minimize_staged_vfe(
             compile_kwargs=compile_kwargs,
         )
         theta0_2a = _staged_build_theta0(model, sp2a, hyper_state, se2a, Z_state)
-        _run(fun2a, theta0_2a, unpack2a, f"phase2a_c{cycle + 1}", phase2_maxiter_Z, diag_fn_full)
+        result = _run(fun2a, theta0_2a, unpack2a, f"phase2a_c{cycle + 1}", phase2_maxiter_Z, diag_fn_full)
+        if result.status == 99:
+            return result, history, phase_labels, unpack2a, sp2a, se2a
         Z_state = se2a[0].get_value().copy()
 
         # 2b: freeze Z; train all hyperparams (sigma now free)
@@ -888,8 +1033,11 @@ def minimize_staged_vfe(
             compile_kwargs=compile_kwargs,
         )
         theta0_2b = _staged_build_theta0(model, sp2b, hyper_state)
-        _run(fun2b, theta0_2b, unpack2b, f"phase2b_c{cycle + 1}", phase2_maxiter_hyper,
-             _make_diag_2b(Z_state))
+        result = _run(fun2b, theta0_2b, unpack2b, f"phase2b_c{cycle + 1}", phase2_maxiter_hyper,
+                      _make_diag_2b(Z_state))
+        if result.status == 99:
+            # Phase 2b doesn't have its own Z extra; reuse phase 2a's Z shared var.
+            return result, history, phase_labels, unpack2b, sp2b, [se2a[0]]
         hyper_state = {vv: sp2b[vv].get_value().copy() for vv in model.continuous_value_vars}
 
     # Phase 3: joint fine-tuning
