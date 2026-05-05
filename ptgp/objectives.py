@@ -8,6 +8,7 @@ ELBOTerms = namedtuple("ELBOTerms", ["elbo", "var_exp", "kl"])
 CollapsedELBOTerms = namedtuple(
     "CollapsedELBOTerms", ["elbo", "fit", "trace_penalty", "nystrom_residual"]
 )
+FITCTerms = namedtuple("FITCTerms", ["fitc", "fit", "logdet"])
 
 
 # Diagonal jitter added to Kuu before Cholesky / inversion, to keep it PSD
@@ -163,6 +164,85 @@ def collapsed_elbo(vfe, X, y):
         trace_penalty=trace_penalty,
         nystrom_residual=nystrom_residual,
     )
+
+
+def fitc_log_marginal_likelihood(vfe, X, y):
+    """FITC (Fully Independent Training Conditional) approximate log marginal likelihood.
+
+    Unlike ``collapsed_elbo``, FITC is not a lower bound — it approximates the
+    log marginal likelihood using the true per-point diagonal rather than the
+    Nystrom diagonal throughout. The FITC covariance is::
+
+        K_fitc = Q + diag(ν),   ν_i = Kff_ii - Q_ii + σ²
+
+    where ``Q = Kuf.T @ inv(Kuu) @ Kuf``. Each ``ν_i ≥ σ² > 0``, so ``K_fitc``
+    is always positive definite. The per-point correction makes the marginal
+    variance of each ``f_i`` exact (not just its Nystrom approximation).
+
+    Factorisation
+    -------------
+    Let ``Lu = chol(Kuu)`` and ``A = Lu^{-1} Kuf`` (M × N). Then
+    ``Q_ii = sum(A[:, i]**2)``, ``ν_i = Kff_ii - Q_ii + σ²``, and by the
+    Woodbury identity and matrix determinant lemma::
+
+        K_fitc^{-1} = diag(ν⁻¹) - diag(ν⁻¹) A^T B^{-1} A diag(ν⁻¹)
+        log|K_fitc| = Σ log(ν_i) + log|B|
+
+    where ``B = I + A diag(ν⁻¹) A^T`` (M × M) has eigenvalues ≥ 1 and is
+    therefore well-conditioned regardless of σ² or the kernel scale.
+
+    Parameters
+    ----------
+    vfe : VFE
+        VFE sparse GP model. FITC uses the same inducing-variable structure as VFE.
+    X : tensor, shape (N, D)
+    y : tensor, shape (N,)
+
+    Returns
+    -------
+    FITCTerms
+        ``fitc`` — FITC approximate log marginal likelihood (fit + logdet).
+        ``fit`` — quadratic term: ``-0.5 * (y^T K_fitc^{-1} y + N log 2π)``.
+        ``logdet`` — log-determinant term: ``-0.5 log|K_fitc|``.
+    """
+    sigma2 = vfe.likelihood.sigma**2
+    N = X.shape[0]
+    Z = vfe.inducing_variable.Z
+    M = Z.shape[0]
+
+    mu = vfe.mean(X)
+    Kff_diag = vfe.kernel.diag(X)
+    Kuf = vfe.kernel(Z, X)            # M × N
+    Kuu = vfe.kernel(Z)               # M × M
+    Kuu = pt.assume(
+        Kuu + _DEFAULT_JITTER * pt.eye(M, dtype=Kuu.dtype),
+        positive_definite=True, symmetric=True,
+    )
+
+    Lu = pt.linalg.cholesky(Kuu)
+    A = pt.linalg.solve_triangular(Lu, Kuf, lower=True)   # M × N
+    Q_diag = pt.sum(A * A, axis=0)                        # N
+
+    # Per-point FITC variance: true marginal minus Nystrom approx plus noise.
+    # Guaranteed ≥ σ² > 0 because Kff_ii ≥ Q_ii (Kff - Q is PSD).
+    nu = Kff_diag - Q_diag + sigma2                       # N
+
+    diff = y - mu
+    beta = diff / nu                                       # N
+    alpha = A @ beta                                       # M
+
+    # B has eigenvalues ≥ 1 (A diag(ν⁻¹) A^T is PSD), so it is well-conditioned.
+    B = pt.eye(M, dtype=Kuu.dtype) + (A / nu[None, :]) @ A.T
+    B = pt.assume(B, positive_definite=True, symmetric=True)
+
+    quad = pt.sum(diff * beta) - alpha @ pt.linalg.inv(B) @ alpha
+
+    _, logdet_B = pt.linalg.slogdet(B)
+    logdet_Kfitc = pt.sum(pt.log(nu)) + logdet_B
+
+    fit = -0.5 * (quad + N * pt.log(2.0 * pt.pi))
+    logdet = -0.5 * logdet_Kfitc
+    return FITCTerms(fitc=fit + logdet, fit=fit, logdet=logdet)
 
 
 def dpp_regularizer(vfe, jitter=_DEFAULT_JITTER):

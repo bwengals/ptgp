@@ -18,6 +18,11 @@ parameter list.
   trace_penalty, nystrom_residual, sigma, fit_per_n,
   excess_fit_per_n)`** — diagnostic-only namedtuple producer for
   `compile_scipy_diagnostics` + `tracked_minimize`.
+- **`fitc_log_marginal_likelihood(vfe, X, y) -> FITCTerms(fitc, fit,
+  logdet)`** — FITC approximate log marginal likelihood. Uses the true
+  per-point diagonal ``ν_i = Kff_ii - Q_ii + σ²`` instead of the flat
+  ``σ²`` of VFE. Not a lower bound; tends to give better-calibrated
+  predictive variances. Same Woodbury factorisation as `collapsed_elbo`.
 - **`dpp_regularizer(vfe, jitter=1e-6) -> scalar`** — `log det K(Z, Z)`
   repulsive regulariser. Add a positive multiple to `collapsed_elbo` to
   fight `inducing_collapse`.
