@@ -69,6 +69,8 @@ Prefer one-sentence commit messages for smaller and simpler changes. Use a one-s
 
 After finishing a plan or feature, prompt the user whether to `git add` and commit the recent changes. Don't auto-commit; wait for explicit confirmation before staging or committing.
 
+Never include a `Co-Authored-By: Claude ...` trailer in any commit message.
+
 ## Skills (`.claude/skills/`)
 
 The repo ships a `ptgp-vfe` skill at `.claude/skills/ptgp-vfe/`. When changing any of:
