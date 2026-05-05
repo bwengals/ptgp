@@ -65,8 +65,16 @@ def _make_initial_point(model, init="prior_median", rng=None, n_median_samples=5
         ``pm.icdf`` is not available for an RV. Only used under
         ``init="prior_median"``.
 
+    initval priority
+    ----------------
+    Under ``"prior_median"`` and ``"prior_draw"``, if the user set
+    ``initval=v`` on a PyMC RV, that value is used as the starting point for
+    that RV and the prior-based computation is skipped. This lets you pin
+    specific parameters to a designed starting point while leaving the rest
+    to be initialised from the prior.
+
     Per-RV fallback for improper priors
-    -----------------------------------
+    ------------------------------------
     Some priors cannot be sampled or quantiled. Improper priors like
     ``pm.HalfFlat`` and ``pm.Flat`` raise ``NotImplementedError`` from both
     ``pm.icdf`` and ``pm.draw`` because they have no proper measure. When
@@ -104,7 +112,13 @@ def _make_initial_point(model, init="prior_median", rng=None, n_median_samples=5
         vv = model.rvs_to_values[rv]
         val = None
 
-        if init == "prior_median":
+        # If the user pinned this RV with initval=, honour it and skip the
+        # prior-based computation entirely.
+        user_initval = model.rvs_to_initial_values.get(rv)
+        if user_initval is not None:
+            val = np.asarray(user_initval, dtype=np.float64)
+
+        if val is None and init == "prior_median":
             # Try exact icdf(0.5) first.
             try:
                 val_t = pm.icdf(rv, 0.5).eval()
