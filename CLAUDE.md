@@ -66,3 +66,16 @@ Read source code in `comparison_libraries/` (GPJax, GPflow, GPyTorch, CoLA, line
 ## Commits
 
 Prefer one-sentence commit messages for smaller and simpler changes. Use a one-sentence subject + multi-line body only for more complex changes that genuinely warrant explanation (multi-file refactors, non-obvious design decisions, behavior changes that need context).
+
+After finishing a plan or feature, prompt the user whether to `git add` and commit the recent changes. Don't auto-commit; wait for explicit confirmation before staging or committing.
+
+## Skills (`.claude/skills/`)
+
+The repo ships a `ptgp-vfe` skill at `.claude/skills/ptgp-vfe/`. When changing any of:
+
+- `ptgp/objectives.py` — especially `VFEDiagnostics`, `CollapsedELBOTerms`, `vfe_diagnostics`, `collapsed_elbo`, `dpp_regularizer`
+- `ptgp/optim/training.py` — especially `compile_scipy_objective`, `compile_scipy_diagnostics`, `tracked_minimize`, `minimize_staged_vfe`
+- `ptgp/inducing.py` — especially `GreedyVarianceDiagnostics`, `greedy_variance_init`, `kmeans_init` dedup logic
+- `ptgp/utils.py` — `check_init`, `get_initial_params`
+
+…check whether the skill needs updating: `reference/api.md` for signatures, `reference/interpretation.md` for renamed/added namedtuple fields, `pitfalls/*.md` for any references to renamed fields. This keeps the in-repo skill current with the code.

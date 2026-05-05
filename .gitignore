@@ -4,6 +4,13 @@ ptgp/_version.py
 # Local working notes
 FUTURE.md
 
+# Archived prototypes / old notebooks (not part of the package)
+archive/
+
+# Per-user Claude Code settings (personal permission caches, not project config)
+.claude/settings.json
+.claude/settings.local.json
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
