@@ -60,27 +60,32 @@ def base_conditional(Kmn, Kmm, Knn, f, q_sqrt=None, white=False, full_cov=False)
         Lmm = pt.linalg.cholesky(Kmm)
         # A_white = Lmm^{-1} @ Kmn
         A_white = pt.linalg.solve(Lmm, Kmn)
-        fmean = A_white.T @ f
+        # pt.dot(f, A_white): contracts over M (static), leaves N (dynamic) trailing.
+        # Avoids DimShuffle(A_white) which makes N the leading dim and breaks JAX
+        # gradient tracing (jnp.broadcast_to rejects dynamic leading shapes).
+        fmean = pt.dot(f, A_white)
         if full_cov:
-            fvar = Knn - A_white.T @ A_white
+            fvar = Knn - pt.tensordot(A_white, A_white, [[0], [0]])
         else:
             fvar = Knn - pt.sum(A_white**2, axis=0)
     else:
-        fmean = A.T @ f
+        fmean = pt.dot(f, A)
         if full_cov:
-            fvar = Knn - A.T @ Kmn
+            fvar = Knn - pt.tensordot(A, Kmn, [[0], [0]])
         else:
             fvar = Knn - pt.sum(A * Kmn, axis=0)
 
     if q_sqrt is not None:
-        # Variational contribution: A.T @ q_cov @ A with q_cov = q_sqrt @ q_sqrt.T
+        # B = q_sqrt.T @ A_white: shape (M, N) — M static as leading dim.
+        # Previously written as A_white.T @ q_sqrt (N, M) which broke JAX gradient
+        # tracing for the same reason as fmean above.
         if white:
-            B = A_white.T @ q_sqrt  # (N, M)
+            B = q_sqrt.T @ A_white  # (M, N)
         else:
-            B = A.T @ q_sqrt  # (N, M)
+            B = q_sqrt.T @ A  # (M, N)
         if full_cov:
-            fvar = fvar + B @ B.T
+            fvar = fvar + pt.tensordot(B, B, [[0], [0]])
         else:
-            fvar = fvar + pt.sum(B**2, axis=1)
+            fvar = fvar + pt.sum(B**2, axis=0)
 
     return fmean, fvar

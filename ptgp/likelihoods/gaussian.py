@@ -17,7 +17,10 @@ class Gaussian(Likelihood):
     """
 
     def __init__(self, sigma):
-        self.sigma = pt.assume(sigma, positive=True)
+        if callable(sigma):
+            self.sigma = lambda X: pt.assume(sigma(X), positive=True)
+        else:
+            self.sigma = pt.assume(sigma, positive=True)
 
     def _log_prob(self, f, y):
         return -0.5 * (LOG2PI + pt.log(self.sigma**2) + (y - f) ** 2 / self.sigma**2)

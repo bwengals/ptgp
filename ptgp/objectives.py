@@ -81,30 +81,17 @@ def elbo(svgp, X, y, n_data=None):
 
 
 def collapsed_elbo(vfe, X, y):
-    """VFE/SGPR collapsed ELBO (Titsias' bound), Bauer/GPflow factored form.
+    """VFE/SGPR collapsed ELBO (Titsias' bound), unified for scalar and callable sigma.
 
-    Same loss as the standard formulation
-        ELBO = log N(y; m, Q + σ²I) - 1/(2σ²) * tr(Kff - Q),
-    where ``Q = Kuf.T @ inv(Kuu) @ Kuf`` is the Nystrom approximation,
-    rewritten so that the N×N inverse and log-det of ``cov = Q + σ²I``
-    become operations on a well-conditioned M×M matrix.
+    When ``vfe.likelihood.sigma`` is a scalar tensor the formulation reduces exactly
+    to the classic homoskedastic bound.  When it is a callable ``X -> σ_vec`` the
+    full heteroskedastic Woodbury factorisation is used:
 
-    Factorisation
-    -------------
-    Let ``Lu = chol(Kuu)`` and ``A = Lu^{-1} @ Kuf`` (M × N). Then
-        D := σ²·Kuu + Kuf·Kuf.T = Lu · (σ²·I + A·A.T) · Lu.T,
-    so ``inv(D) = Lu^{-T} · inv(inner) · Lu^{-1}`` and
-       ``log|D| = 2·log|Lu| + log|inner|``,
-    where ``inner = σ²·I + A·A.T`` has eigenvalues bounded below by σ².
-    This bound is the numerical advantage over inverting D directly: when
-    Kuu is poorly scaled (small kernel amplitude → tiny Kuu eigenvalues),
-    ``D = σ²·Kuu + Kuf·Kuf.T`` can have eigenvalues that underflow,
-    causing ``log|D| → -∞``; ``inner`` cannot.
+        B = A / σ[None, :]   (M × N, each column divided by σᵢ)
+        inner = I + B Bᵀ     (eigenvalues ≥ 1, well-conditioned)
 
-    Identities used (Q = A.T·A, log|Kuu| cancels out):
-        Q                            = A.T @ A
-        Kuf.T @ inv(D) @ v           = A.T @ inv(inner) @ (A @ v)
-        (N-M)·log σ² + log|D| - log|Kuu|  = (N-M)·log σ² + log|inner|
+    The two paths are mathematically equivalent for constant σ (verified by
+    substitution: quad, logdet_cov, and trace_penalty all coincide).
 
     Parameters
     ----------
@@ -115,49 +102,44 @@ def collapsed_elbo(vfe, X, y):
 
     Returns
     -------
-    scalar
-        Collapsed ELBO value.
+    CollapsedELBOTerms
     """
-    sigma2 = vfe.likelihood.sigma**2
     N = X.shape[0]
     Z = vfe.inducing_variable.Z
     M = Z.shape[0]
 
-    mu = vfe.mean(X)
+    mu       = vfe.mean(X)
     Kff_diag = vfe.kernel.diag(X)
-    Kuf = vfe.kernel(Z, X)            # M × N
-    Kuu = vfe.kernel(Z)               # M × M
-    # Add jitter to keep Kuu PSD under float noise — matches GPflow / PyMC default.
-    # Re-annotate after the addition: PyTensor canonicalizes ``Kuu + c·I`` into a
-    # ``set_subtensor`` on the diagonal, which our PSD-inference rules don't see
-    # through. The mathematical identity (PSD + c·I PSD ⇒ PSD) is sound.
+    Kuf      = vfe.kernel(Z, X)   # M × N
+    Kuu      = vfe.kernel(Z)      # M × M
     Kuu = pt.assume(
         Kuu + _DEFAULT_JITTER * pt.eye(M, dtype=Kuu.dtype),
         positive_definite=True, symmetric=True,
     )
 
-    # Factor Kuu once; reuse for both the Q_diag (trace) term and the inner
-    # matrix that replaces D. log|Kuu| never needs to be computed because it
-    # cancels in logdet_cov.
-    Lu = pt.linalg.cholesky(Kuu)
-    A = pt.linalg.solve_triangular(Lu, Kuf, lower=True)   # M × N
-    Q_diag = pt.sum(A * A, axis=0)                        # diag(Kuf.T·Kuu^{-1}·Kuf)
+    Lu     = pt.linalg.cholesky(Kuu)
+    A      = pt.linalg.solve_triangular(Lu, Kuf, lower=True)   # M × N
+    Q_diag = pt.sum(A * A, axis=0)                              # N
 
-    # ``inner`` has eigenvalues ≥ σ²; it is the well-conditioned analogue of
-    # the M×M matrix D = σ²·Kuu + Kuf·Kuf.T from the direct Woodbury form.
-    inner = sigma2 * pt.eye(M, dtype=Kuu.dtype) + A @ A.T
+    sigma_raw = vfe.likelihood.sigma
+    sigma_vec = sigma_raw(X) if callable(sigma_raw) else sigma_raw * pt.ones(N, dtype=Kuu.dtype)
+    sigma2_vec = sigma_vec ** 2
+
+    diff  = y - mu
+    w     = diff / sigma_vec                          # noise-whitened residuals, N
+    B     = A / sigma_vec[None, :]                    # M × N, column-rescaled
+    inner = pt.eye(M, dtype=Kuu.dtype) + B @ B.T     # eigenvalues ≥ 1
     inner = pt.assume(inner, positive_definite=True, symmetric=True)
 
-    diff = y - mu
-    A_diff = A @ diff
-    quad = (diff @ diff - A_diff @ pt.linalg.inv(inner) @ A_diff) / sigma2
+    Bw   = B @ w
+    quad = pt.dot(w, w) - Bw @ pt.linalg.inv(inner) @ Bw
 
     _, logdet_inner = pt.linalg.slogdet(inner)
-    logdet_cov = (N - M) * pt.log(sigma2) + logdet_inner
+    logdet_cov = pt.sum(pt.log(sigma2_vec)) + logdet_inner
 
-    fit = -0.5 * (quad + logdet_cov + N * pt.log(2.0 * pt.pi))
+    fit              = -0.5 * (quad + logdet_cov + N * pt.log(2.0 * pt.pi))
     nystrom_residual = pt.sum(Kff_diag - Q_diag)
-    trace_penalty = -0.5 / sigma2 * nystrom_residual
+    trace_penalty    = -0.5 * pt.dot(Kff_diag - Q_diag, 1.0 / sigma2_vec)
     return CollapsedELBOTerms(
         elbo=fit + trace_penalty,
         fit=fit,
@@ -325,15 +307,17 @@ def vfe_diagnostics(vfe, X, y):
     """
     terms = collapsed_elbo(vfe, X, y)
     N = X.shape[0]
-    sigma = vfe.likelihood.sigma
+    sigma_raw = vfe.likelihood.sigma
+    sigma_vec = sigma_raw(X) if callable(sigma_raw) else sigma_raw * pt.ones(N)
+    sigma_mean = pt.mean(sigma_vec)   # scalar; mean of a constant vector = that constant
     fit_per_n = terms.fit / N
-    excess_fit_per_n = fit_per_n + 0.5 * pt.log(2.0 * np.pi * sigma**2)
+    excess_fit_per_n = fit_per_n + 0.5 * pt.log(2.0 * np.pi * sigma_mean**2)
     return VFEDiagnostics(
         elbo=terms.elbo,
         fit=terms.fit,
         trace_penalty=terms.trace_penalty,
         nystrom_residual=terms.nystrom_residual / N,
-        sigma=sigma,
+        sigma=sigma_mean,
         fit_per_n=fit_per_n,
         excess_fit_per_n=excess_fit_per_n,
     )
