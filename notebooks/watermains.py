@@ -738,6 +738,67 @@ def train_svgp(
 
 
 # ---------------------------------------------------------------------------
+# Natural-gradient updates (Model 3's Gaussian variational blocks)
+# ---------------------------------------------------------------------------
+
+
+def ngd_update_full(m_sh, S_sh, g_m, g_S, gamma):
+    """One natural-gradient step on a full-covariance Gaussian block, in place.
+
+    The step is taken in natural-parameter space (Salimbeni, Eleftheriadis,
+    Hensman 2018): with ``gamma = 1`` and a Gaussian target it lands exactly on
+    that target. If the precision update loses positive definiteness the step
+    retries at half the rate (up to six halvings), so an aggressive ``gamma``
+    degrades into a smaller step instead of a crash.
+
+    Parameters
+    ----------
+    m_sh, S_sh : pytensor shared variables
+        The block's mean vector and covariance matrix, updated in place.
+    g_m, g_S : numpy.ndarray
+        ELBO gradients with respect to the mean and covariance.
+    gamma : float
+        Natural-gradient step size.
+    """
+    from scipy.linalg import cho_factor, cho_solve
+
+    m, S = m_sh.get_value(), S_sh.get_value()
+    g_S = 0.5 * (g_S + g_S.T)
+    c, low = cho_factor(S)
+    Sinv_m = cho_solve((c, low), m)
+    Sinv = cho_solve((c, low), np.eye(len(m)))
+    for _ in range(6):
+        Sinv_new = Sinv - 2.0 * gamma * g_S
+        try:
+            cn = np.linalg.cholesky(Sinv_new)
+        except np.linalg.LinAlgError:
+            gamma *= 0.5
+            continue
+        S_new = cho_solve((cn, True), np.eye(len(m)))
+        S_new = 0.5 * (S_new + S_new.T)
+        m_new = S_new @ (Sinv_m + gamma * (g_m - 2.0 * g_S @ m))
+        m_sh.set_value(m_new)
+        S_sh.set_value(S_new)
+        return
+
+
+def ngd_update_diag(m_sh, s_sh, g_m, g_s, gamma):
+    """Elementwise natural-gradient step on a mean-field Gaussian block, in place.
+
+    The diagonal case of ``ngd_update_full``: ``s_sh`` holds per-coordinate
+    variances. Coordinates whose precision update would go nonpositive are left
+    unchanged for that step.
+    """
+    m, s = m_sh.get_value(), s_sh.get_value()
+    prec_new = 1.0 / s - 2.0 * gamma * g_s
+    ok = prec_new > 1e-8
+    s_new = np.where(ok, 1.0 / np.clip(prec_new, 1e-8, None), s)
+    m_new = np.where(ok, s_new * (m / s + gamma * (g_m - 2.0 * g_s * m)), m)
+    m_sh.set_value(m_new)
+    s_sh.set_value(s_new)
+
+
+# ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
 
@@ -1634,6 +1695,27 @@ def plot_newsvendor(totals, nv):
     print(f"planning to the optimum instead of the mean saves ${saving:,.0f}/yr")
 
 
+def plot_year_effects(years, m, s):
+    """Posterior year effects with 2 sd bars: the model's residual-by-year channel.
+
+    ``m`` and ``s`` are the mean-field posterior means and variances of the iid
+    year effects kappa_t; ``exp(kappa)`` is the multiplicative deviation of that
+    year's citywide rate from what the covariates and the smooth trend explain.
+    """
+    fig, ax = plt.subplots(figsize=(10, 3.6))
+    ax.errorbar(years, m, yerr=2 * np.sqrt(s), fmt="o", ms=4, lw=1, capsize=2, color="tab:blue")
+    ax.axhline(0.0, color="k", lw=0.7)
+    ax.set_xlabel("year")
+    ax.set_ylabel(r"$\kappa_t$ (log rate)")
+    ax.set_title("Year effects: residual annual anomalies")
+    sec = ax.secondary_yaxis(
+        "right", functions=(lambda k: 100 * (np.exp(k) - 1), lambda p: np.log1p(p / 100))
+    )
+    sec.set_ylabel("% vs expected")
+    plt.tight_layout()
+    plt.show()
+
+
 def plot_flagged_map(
     base, segs, first_flagged, title="Mains flagged for replacement, by plan year"
 ):
@@ -1840,3 +1922,37 @@ def test_curve_monotone():
     assert np.all(np.diff(spend) >= 0)
     assert np.all(np.diff(captured) >= 0)
     np.testing.assert_allclose(captured[-1], n_post.sum())
+
+
+def test_ngd_update_full():
+    """With gamma = 1 and a Gaussian target, one natural-gradient step is exact."""
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((4, 4))
+    S0 = A @ A.T + 4.0 * np.eye(4)
+    mu0 = rng.standard_normal(4)
+    m_sh = pytensor.shared(np.zeros(4))
+    S_sh = pytensor.shared(np.eye(4))
+    S0inv = np.linalg.inv(S0)
+    # ELBO gradients of E_q[log N(x; mu0, S0)] + entropy at q = N(0, I)
+    g_m = S0inv @ (mu0 - m_sh.get_value())
+    g_S = 0.5 * (np.linalg.inv(S_sh.get_value()) - S0inv)
+    ngd_update_full(m_sh, S_sh, g_m, g_S, gamma=1.0)
+    np.testing.assert_allclose(m_sh.get_value(), mu0, atol=1e-8)
+    np.testing.assert_allclose(S_sh.get_value(), S0, atol=1e-8)
+
+
+def test_ngd_update_diag():
+    """Diagonal case: gamma = 1 jumps to the target; a nonpositive precision no-ops."""
+    m_sh = pytensor.shared(np.zeros(3))
+    s_sh = pytensor.shared(np.ones(3))
+    mu0 = np.array([1.0, -2.0, 0.5])
+    s0 = np.array([0.5, 2.0, 1.0])
+    g_m = mu0 / s0
+    g_s = 0.5 * (1.0 - 1.0 / s0)
+    ngd_update_diag(m_sh, s_sh, g_m, g_s, gamma=1.0)
+    np.testing.assert_allclose(m_sh.get_value(), mu0)
+    np.testing.assert_allclose(s_sh.get_value(), s0)
+    m_before, s_before = m_sh.get_value().copy(), s_sh.get_value().copy()
+    ngd_update_diag(m_sh, s_sh, np.zeros(3), np.full(3, 10.0), gamma=1.0)
+    np.testing.assert_allclose(m_sh.get_value(), m_before)
+    np.testing.assert_allclose(s_sh.get_value(), s_before)
