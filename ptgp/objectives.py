@@ -319,11 +319,11 @@ def variance_budget(gp, X, y):
         Variance contributed by the mean function, the prior GP signal, and the
         observation noise.
     total_var
-        Their sum — the model-implied marginal variance of ``y``.
+        Their sum, the model-implied marginal variance of ``y``.
     frac_mean, frac_signal, frac_noise
         Each contribution as a fraction of ``total_var`` (sum to one).
     var_ratio
-        ``total_var / Var(y)`` — calibration against the empirical data variance
+        ``total_var / Var(y)``, calibration against the empirical data variance
         (~1 when calibrated, >1 over-dispersed, <1 under-dispersed).
     """
     N = X.shape[0]
@@ -448,14 +448,14 @@ def unapproximated_diagnostics(gp, X, y):
     sigma
         Likelihood noise (the mean of ``sigma`` when it is heteroskedastic).
     fit_per_n, logdet_per_n
-        ``fit / N`` and ``logdet / N`` — per-point data fit and complexity.
+        ``fit / N`` and ``logdet / N``, the per-point data fit and complexity.
     excess_fit_per_n
-        ``mll / N + 0.5 * log(2π * Var(y - m(X))) + 0.5`` — per-point evidence
+        ``mll / N + 0.5 * log(2π * Var(y - m(X))) + 0.5``, the per-point evidence
         relative to a constant-mean Gaussian at the residual variance. Reads 0 at
         that baseline and is invariant to the scale of ``y`` (the residual-variance
         reference cancels the log-determinant's scale dependence).
     frac_mean, frac_signal, frac_noise, var_ratio
-        The mean/GP/noise variance budget — see :func:`variance_budget`.
+        The mean/GP/noise variance budget; see :func:`variance_budget`.
     """
     terms = marginal_log_likelihood(gp, X, y)
     budget = variance_budget(gp, X, y)
